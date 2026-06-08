@@ -225,6 +225,36 @@ async fn talk_where_shows_certified_resolution() {
 }
 
 #[tokio::test]
+async fn audit_record_view_and_download_verify() {
+    let app = router(fixture_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/audit/roommate").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    assert!(html.contains("The record"));
+    assert!(html.to_lowercase().contains("verif"));
+
+    // the downloaded signed record must actually verify
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/audit/roommate/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = body_string(resp).await;
+    let rec: mediator_audit::MediationRecord = serde_json::from_str(&json).unwrap();
+    assert!(mediator_audit::verify(&rec).is_ok(), "downloaded record must verify");
+    assert!(!rec.entries.is_empty());
+}
+
+#[tokio::test]
 async fn party_robin_returns_200_with_kind_copy() {
     let app = router(fixture_state());
     let resp = app

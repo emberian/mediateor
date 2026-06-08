@@ -44,8 +44,80 @@
         ],
         "envy_free": true,
         "equitable": true,
-        "explanation": "Adjusted Winner settlement:\n  The family piano → jordan (whole item)\n  Mum's paintings → alex (whole item)\n  The good china set → jordan (whole item)\n  Dad's woodworking tools → alex (whole item)\nFinal point totals: alex = 70.0000, jordan = 70.0000\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
-        "label": "Adjusted Winner",
+        "explanation": "Adjusted Winner (Brams–Taylor):\n  The family piano → jordan (whole)\n  Mum's paintings → alex (whole)\n  The good china set → jordan (whole)\n  Dad's woodworking tools → alex (whole)\nFinal point totals: alex = 70.0000, jordan = 70.0000\nEnvy-free: true  |  Equitable: true  |  Proportional: true  |  Pareto-optimal: true\nAW is the unique envy-free + equitable allocation for divisible goods.",
+        "label": "Adjusted Winner (envy-free + equitable)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "alex",
+            70.0
+          ],
+          [
+            "jordan",
+            70.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "piano",
+            "jordan"
+          ],
+          [
+            "paintings",
+            "alex"
+          ],
+          [
+            "china",
+            "jordan"
+          ],
+          [
+            "tools",
+            "alex"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Egalitarian / Max-min settlement:\n  The family piano → jordan (whole)\n  Mum's paintings → alex (whole)\n  The good china set → jordan (whole)\n  Dad's woodworking tools → alex (whole)\nFinal point totals: alex = 70.0000, jordan = 70.0000\nWorse-off party's value: 70.0000\nEnvy-free: true  |  Equitable: true  |  Proportional: true  |  Pareto-optimal: true\nThis option maximises the minimum value received by either party, prioritising the worse-off party's share.",
+        "label": "Max-min egalitarian (maximise worse-off party)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "alex",
+            70.0
+          ],
+          [
+            "jordan",
+            70.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "piano",
+            "jordan"
+          ],
+          [
+            "paintings",
+            "alex"
+          ],
+          [
+            "china",
+            "jordan"
+          ],
+          [
+            "tools",
+            "alex"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Split-the-difference equitable compromise:\n  The family piano → jordan (whole)\n  Mum's paintings → alex (whole)\n  The good china set → jordan (whole)\n  Dad's woodworking tools → alex (whole)\nFinal point totals: alex = 70.0000, jordan = 70.0000\nEnvy-free: true  |  Equitable: true  |  Proportional: true  |  Pareto-optimal: true\nEach party targets half of their own total valuation. Divisible items are fractionally split to reach that target; indivisible items go to the party that values them more.",
+        "label": "Split-the-difference (equitable compromise)",
         "pareto_optimal": true,
         "party_points": [
           [
@@ -128,11 +200,13 @@
       "detail": {
         "envy_free": true,
         "labels": [
-          "Adjusted Winner"
+          "Adjusted Winner (envy-free + equitable)",
+          "Max-min egalitarian (maximise worse-off party)",
+          "Split-the-difference (equitable compromise)"
         ],
-        "n_settlements": 1
+        "n_settlements": 3
       },
-      "hash": "3fab5e5ca97a64e75b7f82c35f4fc7c542c904c81226a326f297ac5628af24ea",
+      "hash": "704219d2c6ee2ac4a1e7cc16cf074ea266252a4469daebeaad59a84216d537e4",
       "op": "fair_division",
       "prev_hash": "991f6d557e3b236b5e844d75a1a0014607c35c7a3053cda4e61db17d31e17ef3",
       "seq": 4,

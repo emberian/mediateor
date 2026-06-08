@@ -13,6 +13,8 @@ mediator-prover = { workspace = true }
 mediator-fairdiv = { workspace = true }
 mediator-llm = { workspace = true }
 mediator-session = { workspace = true }
+mediator-audit = { workspace = true }
+ed25519-dalek = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

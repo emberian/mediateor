@@ -44,8 +44,8 @@
         ],
         "envy_free": true,
         "equitable": true,
-        "explanation": "Adjusted Winner settlement:\n  Shared cat (Mochi) → alex (whole item)\n  Living room rug → sam (whole item)\n  Small kitchen appliances → sam (whole item)\n  Bookshelf and books → sam (whole item)\nFinal point totals: alex = 55.0000, sam = 55.0000\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
-        "label": "Adjusted Winner",
+        "explanation": "Adjusted Winner (Brams–Taylor):\n  Shared cat (Mochi) → alex (whole)\n  Living room rug → sam (whole)\n  Small kitchen appliances → sam (whole)\n  Bookshelf and books → sam (whole)\nFinal point totals: alex = 55.0000, sam = 55.0000\nEnvy-free: true  |  Equitable: true  |  Proportional: true  |  Pareto-optimal: true\nAW is the unique envy-free + equitable allocation for divisible goods.",
+        "label": "Adjusted Winner (envy-free + equitable)",
         "pareto_optimal": true,
         "party_points": [
           [
@@ -55,6 +55,78 @@
           [
             "sam",
             55.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "the_cat",
+            "alex"
+          ],
+          [
+            "living_room_rug",
+            "sam"
+          ],
+          [
+            "kitchen_appliances",
+            "sam"
+          ],
+          [
+            "bookshelf",
+            "sam"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Egalitarian / Max-min settlement:\n  Shared cat (Mochi) → alex (whole)\n  Living room rug → sam (whole)\n  Small kitchen appliances → sam (whole)\n  Bookshelf and books → sam (whole)\nFinal point totals: alex = 55.0000, sam = 55.0000\nWorse-off party's value: 55.0000\nEnvy-free: true  |  Equitable: true  |  Proportional: true  |  Pareto-optimal: true\nThis option maximises the minimum value received by either party, prioritising the worse-off party's share.",
+        "label": "Max-min egalitarian (maximise worse-off party)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "alex",
+            55.0
+          ],
+          [
+            "sam",
+            55.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "the_cat",
+            "alex"
+          ],
+          [
+            "living_room_rug",
+            "sam"
+          ],
+          [
+            "kitchen_appliances",
+            "alex"
+          ],
+          [
+            "bookshelf",
+            "alex"
+          ]
+        ],
+        "envy_free": false,
+        "equitable": false,
+        "explanation": "Split-the-difference equitable compromise:\n  Shared cat (Mochi) → alex (whole)\n  Living room rug → sam (whole)\n  Small kitchen appliances → alex (whole)\n  Bookshelf and books → alex (whole)\nFinal point totals: alex = 90.0000, sam = 20.0000\nEnvy-free: false  |  Equitable: false  |  Proportional: false  |  Pareto-optimal: true\nEach party targets half of their own total valuation. Divisible items are fractionally split to reach that target; indivisible items go to the party that values them more.",
+        "label": "Split-the-difference (equitable compromise)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "alex",
+            90.0
+          ],
+          [
+            "sam",
+            20.0
           ]
         ],
         "splits": []
@@ -126,13 +198,15 @@
     },
     {
       "detail": {
-        "envy_free": true,
+        "envy_free": false,
         "labels": [
-          "Adjusted Winner"
+          "Adjusted Winner (envy-free + equitable)",
+          "Max-min egalitarian (maximise worse-off party)",
+          "Split-the-difference (equitable compromise)"
         ],
-        "n_settlements": 1
+        "n_settlements": 3
       },
-      "hash": "530298b2fc2bdeab646d953888f1a9c61c5f404fc9884eeefb661d712d1a27ac",
+      "hash": "d8cf4786a3fbeb7dc8a1f3b6ec4a507affe87482796f42ca1b0e322dc33962bd",
       "op": "fair_division",
       "prev_hash": "43575e61795994e4013e1988c3d257e07617cea2eb8573319176148499931a37",
       "seq": 4,
