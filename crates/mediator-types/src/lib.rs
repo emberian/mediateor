@@ -86,6 +86,12 @@ pub struct LedgerItem {
     pub amount_cents: i64,
     pub asserted_by: PartyId,
     pub disputed: bool,
+    /// When a disputed item's fate hangs on a *specific* crux predicate, name it
+    /// here (the predicate symbol, e.g. `stain_is_damage`). Lets a single
+    /// dispute carry several disputed deductions, each controlled by a different
+    /// contested question. Absent ⇒ fall back to the single-crux behavior.
+    #[serde(default)]
+    pub controlling_crux: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -180,6 +186,22 @@ pub struct Conflict {
     pub claim_ids: Vec<ClaimId>,
 }
 
+/// One isolated contested question a dispute reduces to. A real dispute can
+/// have several of these — each is a predicate the kernel *proved controls* a
+/// formalizable obligation, yet *honestly cannot decide* itself. Handed back to
+/// the humans, never decided here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Crux {
+    /// The contested predicate symbol (e.g. `stain_is_damage`).
+    pub predicate: String,
+    /// The plain-English question the humans must answer (the rendered gloss).
+    pub question: String,
+    /// The host's verdict on the *predicate itself* — expected `Unknown` for a
+    /// genuine crux (the informative answer). `Proved`/`Refuted` means the host
+    /// actually settled it, so it is *not* an open crux.
+    pub verdict: Verdict,
+}
+
 /// The product of analyzing a dispute. The operator cockpit and the party
 /// view are two *projections* of this single structure.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -194,8 +216,14 @@ pub struct Analysis {
     pub ledger_refund_cents: Option<i64>,
     /// Plain findings, e.g. "claimed total $500 refuted; itemized = $450".
     pub ledger_findings: Vec<String>,
-    /// The single contested predicate the whole obligation reduces to.
+    /// The single contested predicate the whole obligation reduces to. Kept for
+    /// back-compat: when there are multiple cruxes, this is set from the first.
     pub crux: Option<String>,
+    /// The full set of contested questions the dispute reduces to. A genuine
+    /// dispute is a *set* of cruxes, each controlling some formalizable
+    /// obligation. Empty when there is no certified crux.
+    #[serde(default)]
+    pub cruxes: Vec<Crux>,
     /// Certified-fair settlement options to accept, reject, or counter.
     pub settlements: Vec<Settlement>,
 }

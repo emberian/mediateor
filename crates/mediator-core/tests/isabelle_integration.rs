@@ -137,3 +137,58 @@ fn roommate_reduction_checks_against_real_isabelle() {
     assert_eq!(get("crux_is_damage"), Verdict::Unknown, "crux is_damage must be undecided");
     assert_eq!(get("crux_is_wear"), Verdict::Unknown, "crux is_wear must be undecided");
 }
+
+/// The MULTI-crux reduction against real Isabelle. `scenarios/twocrux.json` has
+/// TWO contested deductions controlled by TWO different questions. We assert the
+/// host certifies BOTH bridges (each iff Proved) and hands BOTH predicates back
+/// undecided (each `_holds`/`_fails` Unknown) — the whole point of the deep one.
+#[test]
+fn twocrux_reduction_checks_against_real_isabelle() {
+    if !PathBuf::from(ISABELLE).exists() {
+        eprintln!("skipping: isabelle not found at {ISABELLE}");
+        return;
+    }
+
+    let dispute = load_dispute(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scenarios/twocrux.json"
+    ))
+    .expect("load twocrux scenario");
+
+    let preamble = build_preamble(&dispute);
+    let obligations = build_obligations(&dispute);
+    assert!(preamble.contains("theory Mediator_Probe"));
+    assert!(!preamble.trim_end().ends_with("end"), "preamble must not close the theory");
+
+    let home_user = PathBuf::new();
+    let mut verdicts = std::collections::HashMap::new();
+    for (i, ob) in obligations.iter().enumerate() {
+        // Offset idx so theory/session names never collide with the roommate test.
+        let v = run_obligation(&preamble, ob, 100 + i, &home_user);
+        eprintln!("obligation {:<22} -> {:?}", ob.name, v);
+        assert!(
+            !matches!(v, Verdict::Error(_)),
+            "obligation {} produced invalid Isabelle / errored: {:?}\n--- theory ---\n{}",
+            ob.name,
+            v,
+            standalone_theory(&preamble, ob)
+        );
+        verdicts.insert(ob.name.clone(), v);
+    }
+    let get = |n: &str| verdicts.get(n).cloned().unwrap();
+
+    // The certifiable core stands.
+    assert_eq!(get("refund_damage_world"), Verdict::Proved, "refund (all deductions stand)");
+    assert_eq!(get("refund_wear_world"), Verdict::Proved, "refund (disputed deductions fall)");
+    assert_eq!(get("over_claim_refuted"), Verdict::Proved, "over-claim refuted");
+
+    // BOTH bridges proved — the reduction holds for each contested deduction.
+    assert_eq!(get("crux_iff_0"), Verdict::Proved, "bridge 0 (cabinetry rework) reduction");
+    assert_eq!(get("crux_iff_1"), Verdict::Proved, "bridge 1 (change order) reduction");
+
+    // BOTH predicates handed back undecided — the kernel decides neither.
+    assert_eq!(get("crux_0_holds"), Verdict::Unknown, "crux 0 must be undecided");
+    assert_eq!(get("crux_0_fails"), Verdict::Unknown, "crux 0 negation must be undecided");
+    assert_eq!(get("crux_1_holds"), Verdict::Unknown, "crux 1 must be undecided");
+    assert_eq!(get("crux_1_fails"), Verdict::Unknown, "crux 1 negation must be undecided");
+}

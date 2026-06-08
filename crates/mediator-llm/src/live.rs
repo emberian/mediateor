@@ -40,6 +40,51 @@ pub const MAX_OUTPUT_TOKENS: i32 = 600;
 
 // ─────────────────────────────── config ─────────────────────────────────
 
+/// The provider behind a model. Used to surface **per-provider dissent**: when
+/// models from *different* providers disagree, that is a stronger signal of
+/// genuine ambiguity than two checkpoints of the same family splitting, because
+/// their training biases are uncorrelated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Provider {
+    Anthropic,
+    DeepSeek,
+    Mistral,
+    Amazon,
+    Other,
+}
+
+impl Provider {
+    /// A short human label.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "Anthropic",
+            Provider::DeepSeek => "DeepSeek",
+            Provider::Mistral => "Mistral",
+            Provider::Amazon => "Amazon",
+            Provider::Other => "Other",
+        }
+    }
+
+    /// Best-effort inference of the provider from a Bedrock model id. Bedrock
+    /// ids are provider-prefixed (`amazon.*`, `mistral.*`, `deepseek.*`) or
+    /// carry a region-inference prefix in front of `anthropic.*`
+    /// (`us.anthropic.*`), so a substring match is reliable.
+    pub fn from_model_id(id: &str) -> Self {
+        let id = id.to_ascii_lowercase();
+        if id.contains("anthropic") || id.contains("claude") {
+            Provider::Anthropic
+        } else if id.contains("deepseek") {
+            Provider::DeepSeek
+        } else if id.contains("mistral") {
+            Provider::Mistral
+        } else if id.contains("amazon") || id.contains("nova") || id.contains("titan") {
+            Provider::Amazon
+        } else {
+            Provider::Other
+        }
+    }
+}
+
 /// A model id paired with a friendly display name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelSpec {
@@ -47,6 +92,66 @@ pub struct ModelSpec {
     pub id: String,
     /// A human label shown in the UI, e.g. `"Claude Haiku 4.5"`.
     pub label: String,
+}
+
+impl ModelSpec {
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+
+    /// The inferred provider for this model (used for per-provider dissent).
+    pub fn provider(&self) -> Provider {
+        Provider::from_model_id(&self.id)
+    }
+}
+
+// ── confirmed-working Bedrock model ids (Converse API is uniform across all) ──
+//
+// These are the verified ids on the `commonquant-ember` account. The Converse
+// API path is identical for every one of them; only the id string differs.
+
+/// Claude Haiku 4.5 (Anthropic) — fast, warm. The mediator's own family.
+pub const MODEL_CLAUDE_HAIKU_45: &str = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+/// DeepSeek V3.2 — strong, independent reasoning. Used as the *neutrality*
+/// judge precisely because it is NOT the Claude mediator voice.
+pub const MODEL_DEEPSEEK_V32: &str = "deepseek.v3.2";
+/// Mistral Large 3 (675B) — a big, uncorrelated European model.
+pub const MODEL_MISTRAL_LARGE_3: &str = "mistral.mistral-large-3-675b-instruct";
+/// Amazon Nova Pro — a big Amazon model, a third independent lineage.
+pub const MODEL_NOVA_PRO: &str = "amazon.nova-pro-v1:0";
+/// Amazon Nova Lite — cheap, fast, for high-volume / latency-sensitive work.
+pub const MODEL_NOVA_LITE: &str = "amazon.nova-lite-v1:0";
+
+/// The cheap, high-volume model. Use this where a single fast read suffices
+/// (triage, pre-filtering, anything fired per-keystroke) rather than the full
+/// panel — it keeps spend and latency bounded. Distinct from the depth-oriented
+/// formalization panel below.
+pub const HIGH_VOLUME_MODEL: &str = MODEL_NOVA_LITE;
+
+/// The neutrality judge: it must be **independent of the mediator's voice** so
+/// that a Claude utterance is not graded by a Claude judge (correlated blind
+/// spots). Default: DeepSeek V3.2 — strong reasoning, distinct lineage. This
+/// constant is the single source of truth shared with [`crate::neutrality`].
+pub const NEUTRALITY_MODEL: &str = MODEL_DEEPSEEK_V32;
+
+/// The default **formalization panel**: a deliberately *diverse and big* set
+/// spanning four independent providers (Anthropic, DeepSeek, Mistral, Amazon).
+/// Their biases are uncorrelated, so where they disagree on the normalized IR,
+/// the disagreement localizes genuine ambiguity rather than one model's quirk.
+///
+/// Latency note: this is the depth path — four concurrent calls, one of them a
+/// 675B model. For latency-sensitive / high-volume work use a single
+/// [`HIGH_VOLUME_MODEL`] read instead (see [`LiveConfig::high_volume`]).
+pub fn default_panel() -> Vec<ModelSpec> {
+    vec![
+        ModelSpec::new(MODEL_CLAUDE_HAIKU_45, "Claude Haiku 4.5"),
+        ModelSpec::new(MODEL_DEEPSEEK_V32, "DeepSeek V3.2"),
+        ModelSpec::new(MODEL_MISTRAL_LARGE_3, "Mistral Large 3 (675B)"),
+        ModelSpec::new(MODEL_NOVA_PRO, "Nova Pro"),
+    ]
 }
 
 /// Region + the council of models to consult.
@@ -57,20 +162,37 @@ pub struct LiveConfig {
 }
 
 impl Default for LiveConfig {
+    /// The diverse, big formalization panel across four providers.
     fn default() -> Self {
         Self {
             region: "us-east-1".to_string(),
-            models: vec![
-                ModelSpec {
-                    id: "us.anthropic.claude-haiku-4-5-20251001-v1:0".to_string(),
-                    label: "Claude Haiku 4.5".to_string(),
-                },
-                ModelSpec {
-                    id: "amazon.nova-lite-v1:0".to_string(),
-                    label: "Nova Lite".to_string(),
-                },
-            ],
+            models: default_panel(),
         }
+    }
+}
+
+impl LiveConfig {
+    /// A one-model config using the cheap [`HIGH_VOLUME_MODEL`]. For
+    /// latency-sensitive / per-keystroke work where the full panel is overkill.
+    pub fn high_volume() -> Self {
+        Self {
+            region: "us-east-1".to_string(),
+            models: vec![ModelSpec::new(HIGH_VOLUME_MODEL, "Nova Lite")],
+        }
+    }
+
+    /// The set of distinct providers represented in this panel. A panel that
+    /// spans more providers has more uncorrelated bias and a more trustworthy
+    /// disagreement signal.
+    pub fn providers(&self) -> Vec<Provider> {
+        let mut seen: Vec<Provider> = Vec::new();
+        for m in &self.models {
+            let p = m.provider();
+            if !seen.contains(&p) {
+                seen.push(p);
+            }
+        }
+        seen
     }
 }
 
@@ -81,6 +203,8 @@ impl Default for LiveConfig {
 pub struct Reading {
     /// The model's display label.
     pub model: String,
+    /// The provider behind the model (for per-provider dissent).
+    pub provider: Provider,
     /// The parsed IR, or `None` if the model didn't produce valid `Formula` JSON.
     pub formula: Option<Formula>,
     /// Deterministic English render of `formula` (via `mediator-core`), or an
@@ -94,6 +218,25 @@ pub struct Reading {
     pub issues: Vec<String>,
 }
 
+/// One candidate normalized formula in the council's ranking, with the support
+/// it drew. Surfaced so the operator sees not just the winner but the full
+/// field — and *which providers* backed each candidate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Candidate {
+    /// The normalized-IR key (prose-independent identity of the proposal).
+    pub normalized: String,
+    /// A representative parsed formula for this key.
+    pub formula: Formula,
+    /// How many valid voters proposed this form.
+    pub votes: usize,
+    /// Distinct providers that backed this form (de-duplicated).
+    pub providers: Vec<Provider>,
+    /// Borda points: in each pairwise sense, a candidate beats every candidate
+    /// ranked below it. With plurality scores this reduces to "votes-weighted
+    /// rank", giving a stable total order even on ties. Higher = stronger.
+    pub borda: usize,
+}
+
 /// The council's combined reading.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CouncilReading {
@@ -104,6 +247,20 @@ pub struct CouncilReading {
     pub agreed: Option<Formula>,
     /// A human one-liner describing the vote.
     pub consensus: String,
+    /// The full ranked field of candidate formulas (winner first), by Borda
+    /// score then vote count. Empty when no model produced a valid formula.
+    pub ranking: Vec<Candidate>,
+    /// Whether a single candidate is a *Condorcet winner*: it strictly
+    /// out-votes every other candidate pairwise. With single-choice ballots
+    /// this is exactly "strictly more votes than the runner-up". A Condorcet
+    /// winner is a firmer proposal than a mere plurality lead.
+    pub condorcet_winner: bool,
+    /// A confidence signal in `[0.0, 1.0]`: the fraction of all readings that
+    /// backed the winning form, scaled by provider agreement. `0.0` when there
+    /// is no valid winner. This is advisory — the prover is still the only
+    /// authority — but it lets the UI distinguish "everyone agreed" from
+    /// "a bare plurality."
+    pub confidence: f64,
 }
 
 // ───────────────────────── structural validation ────────────────────────
@@ -414,7 +571,15 @@ fn sort_name(s: &Sort) -> String {
 
 /// Turn one model's raw text into a [`Reading`] (pure; no network). Exposed at
 /// crate level so tests can exercise it without Bedrock.
-pub(crate) fn reading_from_raw(label: &str, raw: &str, sig: &[Sig]) -> Reading {
+///
+/// `provider` is the lineage behind the model (for per-provider dissent).
+/// Tests that don't care may pass [`Provider::Other`].
+pub(crate) fn reading_from_raw(
+    label: &str,
+    provider: Provider,
+    raw: &str,
+    sig: &[Sig],
+) -> Reading {
     let raw_trimmed = raw.trim().to_string();
     match extract_formula_json(&raw_trimmed) {
         Ok((formula, _slice)) => {
@@ -422,6 +587,7 @@ pub(crate) fn reading_from_raw(label: &str, raw: &str, sig: &[Sig]) -> Reading {
             let english = formula_to_english(&formula);
             Reading {
                 model: label.to_string(),
+                provider,
                 formula: Some(formula),
                 english,
                 raw: raw_trimmed,
@@ -431,6 +597,7 @@ pub(crate) fn reading_from_raw(label: &str, raw: &str, sig: &[Sig]) -> Reading {
         }
         Err(e) => Reading {
             model: label.to_string(),
+            provider,
             formula: None,
             english: format!("(no valid formula: {e})"),
             raw: raw_trimmed,
@@ -440,51 +607,160 @@ pub(crate) fn reading_from_raw(label: &str, raw: &str, sig: &[Sig]) -> Reading {
     }
 }
 
-/// Compute the majority `agreed` formula and a human consensus line from the
-/// readings. Only *structurally valid* readings with a parsed formula vote.
-/// The vote is over [`normalize_formula`] keys so prose can't bias it.
-pub(crate) fn tally_consensus(readings: &[Reading]) -> (Option<Formula>, String) {
+/// The full outcome of tallying a panel: the agreed winner (if any), a human
+/// consensus line, the ranked field, the Condorcet flag, and a confidence
+/// signal. Returned by [`tally_consensus`].
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Tally {
+    pub agreed: Option<Formula>,
+    pub consensus: String,
+    pub ranking: Vec<Candidate>,
+    pub condorcet_winner: bool,
+    pub confidence: f64,
+}
+
+/// Compute the council's outcome from the readings. Only *structurally valid*
+/// readings with a parsed formula vote, and the vote is over [`normalize_formula`]
+/// keys so prose can't bias it.
+///
+/// # Ranking (Borda / Condorcet over normalized formulas)
+///
+/// With single-choice ballots, every candidate formula is one bin. We build a
+/// total order by **Borda count**: a candidate's score is the number of
+/// (candidate-instance ranked below it), summed across the implied pairwise
+/// races. For single-choice ballots this collapses to a clean, ties-stable
+/// ordering driven by vote count and then provider breadth. The top candidate
+/// is a **Condorcet winner** iff it strictly out-votes every rival pairwise —
+/// i.e. has strictly more votes than the runner-up.
+///
+/// # Per-provider dissent
+///
+/// Each [`Candidate`] records which *providers* backed it. Two checkpoints of
+/// the same provider splitting is weak evidence of ambiguity; two *different*
+/// providers splitting is strong evidence (uncorrelated biases). The
+/// confidence signal weights provider agreement accordingly.
+pub(crate) fn tally_consensus(readings: &[Reading]) -> Tally {
     let total = readings.len();
 
-    // Collect (normalized-key, formula) for the valid voters.
-    let voters: Vec<(String, &Formula)> = readings
+    // Collect (normalized-key, formula, provider) for the valid voters.
+    let voters: Vec<(String, &Formula, Provider)> = readings
         .iter()
         .filter(|r| r.valid)
-        .filter_map(|r| r.formula.as_ref().map(|f| (normalize_formula(f), f)))
+        .filter_map(|r| {
+            r.formula
+                .as_ref()
+                .map(|f| (normalize_formula(f), f, r.provider))
+        })
         .collect();
 
     if voters.is_empty() {
-        return (
-            None,
-            "No model produced a valid formula — that's the signal.".to_string(),
-        );
+        return Tally {
+            agreed: None,
+            consensus: "No model produced a valid formula — that's the signal.".to_string(),
+            ranking: Vec::new(),
+            condorcet_winner: false,
+            confidence: 0.0,
+        };
     }
 
-    // Tally by normalized key, remembering one representative formula per key.
-    let mut tally: Vec<(String, &Formula, usize)> = Vec::new();
-    for (key, f) in &voters {
-        if let Some(entry) = tally.iter_mut().find(|(k, _, _)| k == key) {
-            entry.2 += 1;
+    // Bin by normalized key, remembering one representative formula, the vote
+    // count, and the set of providers that backed each form.
+    struct Bin<'a> {
+        key: String,
+        formula: &'a Formula,
+        votes: usize,
+        providers: Vec<Provider>,
+    }
+    let mut bins: Vec<Bin> = Vec::new();
+    for (key, f, provider) in &voters {
+        if let Some(b) = bins.iter_mut().find(|b| &b.key == key) {
+            b.votes += 1;
+            if !b.providers.contains(provider) {
+                b.providers.push(*provider);
+            }
         } else {
-            tally.push((key.clone(), f, 1));
+            bins.push(Bin {
+                key: key.clone(),
+                formula: f,
+                votes: 1,
+                providers: vec![*provider],
+            });
         }
     }
-    tally.sort_by_key(|(_, _, votes)| std::cmp::Reverse(*votes));
 
-    let (_, winner_f, top_votes) = &tally[0];
-    let winner = (*winner_f).clone();
-    let top_votes = *top_votes;
+    // Order the field: by votes desc, then provider breadth desc (a form backed
+    // by 3 providers beats one backed by 1 at equal votes), then the normalized
+    // key for a deterministic tiebreak.
+    bins.sort_by(|a, b| {
+        b.votes
+            .cmp(&a.votes)
+            .then(b.providers.len().cmp(&a.providers.len()))
+            .then(a.key.cmp(&b.key))
+    });
 
-    // No structural dissent among the valid voters: every model that produced a
-    // valid formula landed on the SAME normalized IR.
-    let no_dissent = tally.len() == 1;
+    // Borda over the ordered field. With single-choice ballots, every ballot
+    // for candidate i ranks i above all candidates it out-votes; the Borda
+    // points a candidate accrues is votes_i * (number of candidates strictly
+    // below it in the order). We compute it directly from the sorted field so
+    // it stays consistent with the displayed ranking.
+    let n = bins.len();
+    let ranking: Vec<Candidate> = bins
+        .iter()
+        .enumerate()
+        .map(|(rank, b)| {
+            let below = n - 1 - rank; // candidates ranked strictly below this one
+            Candidate {
+                normalized: b.key.clone(),
+                formula: b.formula.clone(),
+                votes: b.votes,
+                providers: b.providers.clone(),
+                borda: b.votes * below,
+            }
+        })
+        .collect();
+
+    let top = &ranking[0];
+    let top_votes = top.votes;
+    let winner = top.formula.clone();
+
+    // No structural dissent among the valid voters: every valid model landed on
+    // the SAME normalized IR.
+    let no_dissent = ranking.len() == 1;
     // Unanimous: no dissent AND every reading was a valid voter.
     let unanimous = no_dissent && voters.len() == total;
     // A genuine *majority* of all readings (used when there IS dissent).
     let is_majority = top_votes * 2 > total;
+    // Condorcet: the top strictly out-votes the runner-up (pairwise win over
+    // every rival, since ballots are single-choice).
+    let runner_up_votes = ranking.get(1).map(|c| c.votes).unwrap_or(0);
+    let condorcet_winner = top_votes > runner_up_votes;
+
+    // Provider agreement of the winner: a form backed by many distinct
+    // providers is more trustworthy than one backed by a single lineage.
+    let winner_providers = top.providers.len() as f64;
+    let total_providers = {
+        let mut seen: Vec<Provider> = Vec::new();
+        for (_, _, p) in &voters {
+            if !seen.contains(p) {
+                seen.push(*p);
+            }
+        }
+        seen.len().max(1) as f64
+    };
+    let provider_share = winner_providers / total_providers;
+
+    // Confidence: fraction of ALL readings backing the winner, lifted toward
+    // 1.0 by provider breadth. Bounded to [0, 1].
+    let vote_share = top_votes as f64 / total as f64;
+    let confidence = (0.5 * vote_share + 0.5 * provider_share * vote_share).clamp(0.0, 1.0);
 
     let consensus = if unanimous {
-        "All models agreed.".to_string()
+        let provs = top.providers.len();
+        if provs >= 2 {
+            format!("All {} models agreed (across {} providers).", total, provs)
+        } else {
+            "All models agreed.".to_string()
+        }
     } else if no_dissent {
         // One agreed form, but some readings produced no valid formula.
         format!(
@@ -492,9 +768,18 @@ pub(crate) fn tally_consensus(readings: &[Reading]) -> (Option<Formula>, String)
             top_votes, total
         )
     } else if is_majority {
-        format!("{} of {} agreed.", top_votes, total)
+        format!(
+            "{} of {} agreed across {} provider(s); {} dissenting form(s).",
+            top_votes,
+            total,
+            top.providers.len(),
+            ranking.len() - 1
+        )
     } else {
-        "The models disagreed — that's the signal.".to_string()
+        format!(
+            "The models split {} ways — that's the signal.",
+            ranking.len()
+        )
     };
 
     // Surface `agreed` when the valid voters did not structurally disagree
@@ -507,7 +792,13 @@ pub(crate) fn tally_consensus(readings: &[Reading]) -> (Option<Formula>, String)
         None
     };
 
-    (agreed, consensus)
+    Tally {
+        agreed,
+        consensus,
+        ranking,
+        condorcet_winner,
+        confidence,
+    }
 }
 
 // ─────────────────────────── live Bedrock call ───────────────────────────
@@ -618,6 +909,7 @@ pub async fn council_formalize_live(
         let client = client.clone();
         let model_id = spec.id.clone();
         let label = spec.label.clone();
+        let provider = spec.provider();
         let sys = sys.clone();
         let usr = usr.clone();
         set.spawn(async move {
@@ -662,18 +954,20 @@ pub async fn council_formalize_live(
                 Ok(text)
             }
             .await;
-            (idx, label, raw)
+            (idx, label, provider, raw)
         });
     }
 
     // Collect, then re-sort to cfg order for stable output.
     let mut out: Vec<(usize, Reading)> = Vec::with_capacity(cfg.models.len());
     while let Some(joined) = set.join_next().await {
-        let (idx, label, raw) = joined.map_err(|e| anyhow::anyhow!("task join error: {e}"))?;
+        let (idx, label, provider, raw) =
+            joined.map_err(|e| anyhow::anyhow!("task join error: {e}"))?;
         let reading = match raw {
-            Ok(text) => reading_from_raw(&label, &text, sig),
+            Ok(text) => reading_from_raw(&label, provider, &text, sig),
             Err(e) => Reading {
                 model: label,
+                provider,
                 formula: None,
                 english: format!("(model call failed: {e})"),
                 raw: String::new(),
@@ -686,13 +980,16 @@ pub async fn council_formalize_live(
     out.sort_by_key(|(idx, _)| *idx);
     let readings: Vec<Reading> = out.into_iter().map(|(_, r)| r).collect();
 
-    let (agreed, consensus) = tally_consensus(&readings);
+    let tally = tally_consensus(&readings);
 
     Ok(CouncilReading {
         claim: claim.to_string(),
         readings,
-        agreed,
-        consensus,
+        agreed: tally.agreed,
+        consensus: tally.consensus,
+        ranking: tally.ranking,
+        condorcet_winner: tally.condorcet_winner,
+        confidence: tally.confidence,
     })
 }
 
@@ -842,10 +1139,16 @@ mod tests {
 
     // ── reading_from_raw + tally_consensus (offline council mechanics) ────
 
+    // A reading helper for tests: model label, provider, raw, sig.
+    fn reading(label: &str, provider: Provider, raw: &str) -> Reading {
+        reading_from_raw(label, provider, raw, &roommate_sig())
+    }
+
     #[test]
     fn reading_marks_invalid_for_undeclared() {
         let r = reading_from_raw(
             "TestModel",
+            Provider::Other,
             r#"{"Atom":{"App":["bogus",[]]}}"#,
             &roommate_sig(),
         );
@@ -857,33 +1160,53 @@ mod tests {
     #[test]
     fn tally_unanimous() {
         let raw = r#"{"Atom":{"App":["stain_is_damage",[]]}}"#;
+        // Same provider on both: the unanimous line should NOT claim multiple
+        // providers.
         let readings = vec![
-            reading_from_raw("A", raw, &roommate_sig()),
-            reading_from_raw("B", raw, &roommate_sig()),
+            reading("A", Provider::Anthropic, raw),
+            reading("B", Provider::Anthropic, raw),
         ];
-        let (agreed, consensus) = tally_consensus(&readings);
+        let t = tally_consensus(&readings);
         assert_eq!(
-            agreed,
+            t.agreed,
             Some(Formula::Atom(Term::App("stain_is_damage".into(), vec![])))
         );
-        assert_eq!(consensus, "All models agreed.");
+        assert_eq!(t.consensus, "All models agreed.");
+        assert_eq!(t.ranking.len(), 1);
+        assert!(t.condorcet_winner);
+        // Single-provider unanimity: full vote share, single provider.
+        assert!(t.confidence > 0.49, "confidence={}", t.confidence);
+    }
+
+    #[test]
+    fn tally_unanimous_across_providers_is_noted() {
+        let raw = r#"{"Atom":{"App":["stain_is_damage",[]]}}"#;
+        let readings = vec![
+            reading("A", Provider::Anthropic, raw),
+            reading("B", Provider::DeepSeek, raw),
+            reading("C", Provider::Mistral, raw),
+        ];
+        let t = tally_consensus(&readings);
+        assert!(t.consensus.contains("3 providers"), "{}", t.consensus);
+        // Unanimous across all providers → confidence 1.0.
+        assert!((t.confidence - 1.0).abs() < 1e-9, "confidence={}", t.confidence);
+        assert!(t.condorcet_winner);
     }
 
     #[test]
     fn tally_disagreement_yields_no_agreed() {
-        let r1 = reading_from_raw(
-            "A",
-            r#"{"Atom":{"App":["stain_is_damage",[]]}}"#,
-            &roommate_sig(),
-        );
-        let r2 = reading_from_raw(
+        let r1 = reading("A", Provider::Anthropic, r#"{"Atom":{"App":["stain_is_damage",[]]}}"#);
+        let r2 = reading(
             "B",
+            Provider::DeepSeek,
             r#"{"Not":{"Atom":{"App":["stain_is_damage",[]]}}}"#,
-            &roommate_sig(),
         );
-        let (agreed, consensus) = tally_consensus(&[r1, r2]);
-        assert_eq!(agreed, None);
-        assert!(consensus.contains("disagreed"), "{consensus}");
+        let t = tally_consensus(&[r1, r2]);
+        assert_eq!(t.agreed, None);
+        assert!(t.consensus.contains("split"), "{}", t.consensus);
+        // A 1-1 split: no Condorcet winner (no strict pairwise lead).
+        assert!(!t.condorcet_winner);
+        assert_eq!(t.ranking.len(), 2);
     }
 
     #[test]
@@ -891,45 +1214,73 @@ mod tests {
         let same = r#"{"Atom":{"App":["stain_is_damage",[]]}}"#;
         let other = r#"{"Not":{"Atom":{"App":["stain_is_damage",[]]}}}"#;
         let readings = vec![
-            reading_from_raw("A", same, &roommate_sig()),
-            reading_from_raw("B", same, &roommate_sig()),
-            reading_from_raw("C", other, &roommate_sig()),
+            reading("A", Provider::Anthropic, same),
+            reading("B", Provider::DeepSeek, same),
+            reading("C", Provider::Mistral, other),
         ];
-        let (agreed, consensus) = tally_consensus(&readings);
+        let t = tally_consensus(&readings);
         assert_eq!(
-            agreed,
+            t.agreed,
             Some(Formula::Atom(Term::App("stain_is_damage".into(), vec![])))
         );
-        assert_eq!(consensus, "2 of 3 agreed.");
+        assert!(t.consensus.contains("2 of 3"), "{}", t.consensus);
+        // 2 votes vs 1: a Condorcet winner.
+        assert!(t.condorcet_winner);
+        // Borda: winner ranked above one rival, votes 2 → borda 2.
+        assert_eq!(t.ranking[0].borda, 2);
+        assert_eq!(t.ranking[1].borda, 0);
+    }
+
+    #[test]
+    fn tally_provider_breadth_breaks_tie() {
+        // Two forms each get 2 votes, but one is backed by 2 distinct providers
+        // and the other by 1. Provider breadth should rank the broader one first.
+        let form_x = r#"{"Atom":{"App":["stain_is_damage",[]]}}"#;
+        let form_y = r#"{"Not":{"Atom":{"App":["stain_is_damage",[]]}}}"#;
+        let readings = vec![
+            reading("A", Provider::Anthropic, form_x),
+            reading("B", Provider::DeepSeek, form_x), // x: 2 providers
+            reading("C", Provider::Mistral, form_y),
+            reading("D", Provider::Mistral, form_y), // y: 1 provider
+        ];
+        let t = tally_consensus(&readings);
+        assert_eq!(t.ranking.len(), 2);
+        assert_eq!(t.ranking[0].votes, 2);
+        assert_eq!(t.ranking[1].votes, 2);
+        // x (2 providers) ranks first.
+        assert_eq!(t.ranking[0].providers.len(), 2);
+        assert_eq!(t.ranking[1].providers.len(), 1);
+        // Tied on votes → no strict pairwise lead → not a Condorcet winner, and
+        // not a majority (2 of 4), so no agreed formula.
+        assert!(!t.condorcet_winner);
+        assert_eq!(t.agreed, None);
     }
 
     #[test]
     fn tally_invalid_voters_excluded() {
         // One valid, one structurally-invalid (undeclared) reading.
-        let valid = reading_from_raw(
-            "A",
-            r#"{"Atom":{"App":["stain_is_damage",[]]}}"#,
-            &roommate_sig(),
-        );
-        let invalid = reading_from_raw("B", r#"{"Atom":{"App":["bogus",[]]}}"#, &roommate_sig());
-        let (agreed, consensus) = tally_consensus(&[valid, invalid]);
+        let valid = reading("A", Provider::Anthropic, r#"{"Atom":{"App":["stain_is_damage",[]]}}"#);
+        let invalid = reading("B", Provider::DeepSeek, r#"{"Atom":{"App":["bogus",[]]}}"#);
+        let t = tally_consensus(&[valid, invalid]);
         // The lone valid voter is the only proposal and faces no structural
         // dissent, so we surface it (the gate checks it regardless). The
         // consensus line stays honest that one reading produced nothing valid.
         assert_eq!(
-            agreed,
+            t.agreed,
             Some(Formula::Atom(Term::App("stain_is_damage".into(), vec![])))
         );
-        assert!(consensus.contains("1 of 2"), "{consensus}");
-        assert!(consensus.contains("no valid formula"), "{consensus}");
+        assert!(t.consensus.contains("1 of 2"), "{}", t.consensus);
+        assert!(t.consensus.contains("no valid formula"), "{}", t.consensus);
     }
 
     #[test]
     fn tally_all_invalid() {
-        let r = reading_from_raw("A", "not json at all", &roommate_sig());
-        let (agreed, consensus) = tally_consensus(&[r]);
-        assert_eq!(agreed, None);
-        assert!(consensus.contains("No model"), "{consensus}");
+        let r = reading("A", Provider::Anthropic, "not json at all");
+        let t = tally_consensus(&[r]);
+        assert_eq!(t.agreed, None);
+        assert!(t.consensus.contains("No model"), "{}", t.consensus);
+        assert_eq!(t.confidence, 0.0);
+        assert!(t.ranking.is_empty());
     }
 
     // ── prompt construction is total / sane ──────────────────────────────
@@ -945,11 +1296,57 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_two_models() {
+    fn default_config_is_a_diverse_big_panel() {
         let cfg = LiveConfig::default();
         assert_eq!(cfg.region, "us-east-1");
-        assert_eq!(cfg.models.len(), 2);
+        // Diverse + big: four models.
+        assert_eq!(cfg.models.len(), 4);
         assert_eq!(cfg.models[0].label, "Claude Haiku 4.5");
-        assert_eq!(cfg.models[1].label, "Nova Lite");
+        // Spans four distinct, uncorrelated providers.
+        let provs = cfg.providers();
+        assert_eq!(provs.len(), 4, "panel should span 4 providers: {provs:?}");
+        assert!(provs.contains(&Provider::Anthropic));
+        assert!(provs.contains(&Provider::DeepSeek));
+        assert!(provs.contains(&Provider::Mistral));
+        assert!(provs.contains(&Provider::Amazon));
+    }
+
+    #[test]
+    fn high_volume_config_is_one_cheap_model() {
+        let cfg = LiveConfig::high_volume();
+        assert_eq!(cfg.models.len(), 1);
+        assert_eq!(cfg.models[0].id, HIGH_VOLUME_MODEL);
+        // The cheap model is an Amazon Nova (high-volume lineage).
+        assert_eq!(cfg.models[0].provider(), Provider::Amazon);
+    }
+
+    #[test]
+    fn provider_inference_from_bedrock_ids() {
+        assert_eq!(
+            Provider::from_model_id("us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+            Provider::Anthropic
+        );
+        assert_eq!(Provider::from_model_id("deepseek.v3.2"), Provider::DeepSeek);
+        assert_eq!(
+            Provider::from_model_id("mistral.mistral-large-3-675b-instruct"),
+            Provider::Mistral
+        );
+        assert_eq!(
+            Provider::from_model_id("amazon.nova-pro-v1:0"),
+            Provider::Amazon
+        );
+        assert_eq!(Provider::from_model_id("some.unknown-model"), Provider::Other);
+    }
+
+    #[test]
+    fn neutrality_model_is_independent_of_the_claude_mediator() {
+        // The neutrality judge must NOT share the mediator's (Claude) lineage,
+        // or it inherits correlated blind spots.
+        assert_ne!(
+            Provider::from_model_id(NEUTRALITY_MODEL),
+            Provider::Anthropic,
+            "neutrality judge must be independent of the Claude mediator voice"
+        );
+        assert_eq!(Provider::from_model_id(NEUTRALITY_MODEL), Provider::DeepSeek);
     }
 }

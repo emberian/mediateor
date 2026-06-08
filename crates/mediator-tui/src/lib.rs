@@ -721,6 +721,7 @@ mod tests {
     /// Build a representative `Analysis` covering all the interesting cases.
     fn sample_analysis() -> Analysis {
         Analysis {
+            cruxes: Vec::new(),
             shared_core: vec![
                 "Both parties agree the deposit was $1,200.00.".to_string(),
                 "Professional cleaning ($150.00) is undisputed.".to_string(),
