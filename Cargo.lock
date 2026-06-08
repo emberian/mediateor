@@ -1459,6 +1459,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mediator-session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mediator-core",
+ "mediator-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mediator-tui"
 version = "0.1.0"
 dependencies = [
