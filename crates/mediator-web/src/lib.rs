@@ -177,6 +177,9 @@ impl AppState {
 
 type SharedState = Arc<AppState>;
 
+/// Max live interactive sessions kept in memory at once (oldest evicted past it).
+const MAX_SESSIONS: usize = 500;
+
 /// A warm, human one-liner for the gallery card. Keyed by scenario id so the
 /// copy reads well regardless of the kernel's internal (carpet-flavoured) text;
 /// falls back to a gentle generic framing for unknown scenarios.
@@ -473,7 +476,21 @@ async fn talk_start(
 
     let sid = format!("s{}", state.next_sid.fetch_add(1, Ordering::Relaxed));
     let session = Session::new(d.dispute.clone(), d.analysis.clone(), d.receipts.clone());
-    state.sessions.write().await.insert(sid.clone(), session);
+    {
+        // Bound the in-memory store so the public box can't grow unboundedly from
+        // many session starts: at the cap, evict the oldest (lowest sid number).
+        let mut map = state.sessions.write().await;
+        if map.len() >= MAX_SESSIONS {
+            if let Some(oldest) = map
+                .keys()
+                .min_by_key(|k| k.trim_start_matches('s').parse::<u64>().unwrap_or(u64::MAX))
+                .cloned()
+            {
+                map.remove(&oldest);
+            }
+        }
+        map.insert(sid.clone(), session);
+    }
 
     let opener = format!(
         "I'm really glad you're here, {name}. This is just between us — nothing you say \
