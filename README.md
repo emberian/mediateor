@@ -1,220 +1,221 @@
 # we hate each other but not that badly ☄️
 
-*A trusted mediator. It doesn't judge — it makes the **shape** of a disagreement
-legible to the people inside it, and keeps everyone honest about the few things
-that must not be fudged.*
+*A peace technology. An impartial, patient, **disinterested** guide that helps two
+people resolve a disagreement they'd both rather not let escalate — and is
+trustworthy enough to use with no one in the robe, because the few things that
+must not be fudged are checked by a machine that has no stake in the outcome.*
 
 > two worlds, each whole, each sure it sees the whole —
 > we don't crown a winner of the two;
 > we build the smallest world that holds them both, and true.
 
 Codename **Mediateor** (a meteor ☄️ of a mediator). Built by ember (proof
-engineer / architect) and Claude, for pug to give a face;
-seeded by [world-model-trajectories](https://emberian.github.io/world-model-trajectories/).
+engineer, trained peer mediator) and Claude, with pug giving it a face; seeded by
+[world-model-trajectories](https://emberian.github.io/world-model-trajectories/).
+Live, password-walled for now, at **mediateor.fg-goose.online**.
 
 ---
 
-## The one honest idea
+## Why this matters more than it looks like it should
+
+Justice is the oldest technology for living together despite disagreement — how a
+group metabolizes conflict without tearing itself apart. And every fair *process*
+humans have built — courts, law, arbitration, mediation — has failed at the same
+two points in every society that built it: it is **scarce** (it runs on expensive,
+tired, trained humans, so most conflict never reaches it and the more powerful
+party wins by default) and it is **capturable** (the humans in the robes have
+moods and mortgages and biases). "Equal justice" has never once been kept, because
+fair process has never been abundant or incorruptible.
+
+For the first time there's a path to a process that is **abundant** (a machine
+doesn't tire or bill by the hour — it can be there for the carpet stain *and* the
+estate, at 3am, for free), **structurally disinterested** (no stake in your
+outcome), **transparent and auditable** (its reasoning is a signed record you can
+check, not a deliberation behind a bench), **consistent** (no hungry-judge effect),
+and — the part that turns it from frightening to trustworthy — **humble** (it knows
+what it cannot decide, and hands those questions *back*).
+
+The same parts, assembled with three different commitments, build the most
+efficient injustice machine ever made. So the design choices that look small are
+the whole thing — they are the **constitution** of it (see below). We mean to build
+the first one, and the toy scale is exactly how you build a peace technology
+without lying about it.
+
+## The one honest idea (and a trained peer mediator already knew it)
 
 Most of a dispute is **not formalizable** — values that don't share a scale,
 recognition, the fight under the fight ("you owe me $400" is usually "you checked
-out on me for months"). That part stays the work of the LLM mediator and the
-humans. We don't pretend a theorem prover can resolve it. The graveyard of this
-field is full of systems that tried to formalize *everything* and died; the
-survivors formalize a thin slice. **We formalize the thin slice and refuse the
-rest, visibly.**
+out on me for months"). A theorem prover can't touch that, and we don't pretend it
+can. The graveyard of this field is full of systems that tried to formalize
+*everything* and died.
 
-What the formal core *does* earn its keep on is narrow and real:
+What a dispute *is*, instead, is the thing a trained peer mediator runs: make it
+safe and voluntary; give each person **uninterrupted time** to be heard fully;
+reflect back what you heard; surface the interest under the position; find the
+common ground (it's bigger than the fight makes it feel); generate options *without
+judgment*; reach an agreement that's specific, mutual, and **owned by both**. The
+mediator never decides — they *facilitate*; the parties decide. **That basic human
+process is the product.** The AI does it, with infinite patience and no stake.
 
-- **the ledger** — a calculator that cannot be lied to (not by a motivated
-  roommate, not by a hallucinating model);
-- **consistency** — whether two claims actually clash, or just use different words;
-- **the crux** — collapsing a whole tangled fight onto the *one* contested
-  question, and handing exactly that back to the humans;
-- **fair division** — provably envy-free, equitable settlements over divisible stakes.
+So why any formalism at all? Because the reason you'd never trust an unsupervised
+AI with your dispute is that it could hallucinate the numbers, paper over a real
+contradiction, or be steered by whoever wrote the more sympathetic prompt. **The
+formal core kills exactly those failure modes and nothing else** — the ledger can't
+be faked, a "resolution" can't be internally incoherent, "you actually agree about
+X" is *certified* rather than vibed, and every load-bearing claim leaves a receipt.
+That thin, boring guarantee is **the trust substitute for the professional who
+isn't in the room** — which is the only way this works at grassroots scale. The
+prover refusing to decide the crux is just the machine learning the humility a
+16-year-old in a peer-mediation vest already has.
 
-The core's real gift is **subtraction**: clear the parts only *masquerading* as
-the dispute, so the real, smaller knot is visible and out in the open.
+The rule: **model proposes, prover disposes.** The LLMs (a council of diverse
+models) only ever *propose* solver-checkable artifacts; nothing is load-bearing
+until [Isabelle/HOL](https://isabelle.in.tum.de/) certifies it. The formal core is
+maybe a fifth of the system — and that is correct, not a disappointment.
 
-And the rule that makes it trustworthy: **model proposes, prover disposes.** The
-LLM (and the council of diverse models) only ever *proposes* solver-checkable
-artifacts; nothing is load-bearing until [Isabelle/HOL](https://isabelle.in.tum.de/)
-certifies it. Sympathetic framing can't reach the verdict, because the council
-evaluates the *normalized formal* form, never the prose. Every certified fact is
-written to an append-only, hash-chained receipt ledger.
+## What it actually does
 
-## A walk through the demo
+Talk to it in plain words — *"Maria lent her cousin $2,000 for a car; he says
+$800 was a gift, she says it was all a loan…"* — and it:
 
-`scenarios/roommate.json` — Robin is moving out; Sam holds the $1,200 deposit.
-They're fighting over a carpet stain and some shared furniture, and they hate each
-other, but not *that* badly. Mediateor:
+- **builds the case from what you said** (accretion): a model drafts the structure,
+  the prover certifies the numbers and isolates the contested question;
+- **conducts a real mediation** (live, on the box): private caucuses where it
+  reflects back the interest under each position, then reflects the common ground,
+  then names the one genuine knot and **hands it back undecided**, then offers
+  certified-fair settlement options to accept, reject, or counter;
+- **takes evidence** — each person's account, claimed facts, exhibits — and *weighs
+  and acknowledges* it so they feel heard, but **never lets it decide the crux**:
+  evidence informs the humans; it does not let the machine rule;
+- **leaves a signed, tamper-evident record** anyone can re-verify — every certified
+  fact and every binding step, hash-chained and ed25519-signed.
 
-1. **Certifies the ledger.** Itemized deductions are cleaning ($150) + carpet
-   ($300) = **$450**. Sam's verbal claim of "$500" is *refuted by the host* — not
-   by anyone's say-so. Refund is **$1,050** if the stain is ordinary wear,
-   **$750** if it's chargeable damage.
-2. **Isolates the crux.** From the lease, `tenant_owes_carpet ⟷ stain_is_damage`.
-   The prover proves the entire carpet question reduces to one predicate — *is the
-   stain damage or wear?* — and then **stops**. That's the human question. It is
-   not the kernel's to decide, and the kernel says so.
-3. **Dissolves a misunderstanding.** The "$500 vs $450" was a rough memory, not a
-   lie — surfaced kindly, with a receipt, as a number to correct.
-4. **Offers fair settlements.** Adjusted Winner splits the shared belongings into
-   an envy-free, equitable allocation to accept, reject, or counter.
-
-Robin and Sam never see a single formula. They see: *here's what you already
-agree on (it's more than you think), here's the one real knot, and here are fair
-options.* The verdict is never "you're wrong." It's *here is the smallest world
+Nobody in the dispute ever sees a formula. They see: *here's what you already agree
+on (more than you thought); here's the one real question, which is yours; here are
+fair options.* The verdict is never "you're wrong." It's *here is the smallest world
 that holds you both.*
 
-## The session — the AI actually mediating
+## The constitution (the line between the two futures)
 
-The kernel is the trust spine; the **session** is the point. An impartial guide
-with no stake in the outcome conducts a real mediation — and the certified facts
-sit quietly underneath so it can't fudge a number, paper over a contradiction, or
-be steered by whoever wrote the more sympathetic prompt. *The prover is the
-stand-in for the professional who isn't in the room* — which is what lets a
-community opt into this instead of a worse escalation, with no professional
-present and a human always one button away.
+These are not features. They are the difference between a peace technology and
+automated domination in a velvet glove:
 
-- **`GET /session/:dispute`** — watch a full mediation, conducted end to end: the
-  private caucuses (with the interest the mediator heard *under* each position),
-  the shared ground, the one open question handed back, and the fair options.
-- **`GET /talk/:dispute/:party`** — *talk to the mediator yourself.* Speak as one
-  party; it listens and reflects in real back-and-forth (htmx). When you're ready,
-  "see where this could land" surfaces the certified shared ground, the crux, and
-  the fair options — tying the felt conversation to the trustworthy outcome.
-
-On the deployed box the session is conducted **live by Claude Haiku 4.5** (Bedrock,
-instance-role auth, no keys); offline it falls back to a deterministic scripted
-voice so it always runs. The mediator writes the *human* part; it never invents a
-fact or a settlement — those stay load-bearing from the prover.
+- **Voluntary, never coercive**, with an **exit and a human always one button
+  away.** The instant it's the *only* door, it stops being justice.
+- **It refuses the questions of value.** The crux comes back `Unknown` *on purpose* —
+  the genuinely human/moral question is handed to the humans, every time.
+- **Auditable by anyone.** Trust comes from the *verifiable record*, not the
+  arbiter's virtue. (`quis custodiet ipsos custodes`, answered structurally: the
+  judge can't lie about the facts, can't hide its reasoning, can't overstep.)
+- **No proprietary power enthroned.** The council is moving to *fully open-weights*
+  models (DeepSeek, Mistral Large, Qwen — and as soon as one's serverless-cheap,
+  the biggest open NVIDIA Nemotron), spanning providers so no single maker's bias
+  is the law. Diverse minds, none of them the throne.
 
 ## Architecture
 
-The cathedral is **backstage**. Only the LLM walks its halls; the people in the
-dispute receive the plain-language mass.
+The cathedral is **backstage** — only the AI walks its halls; the people receive a
+plain, kind conversation.
 
 ```
-   UNTRUSTED                          TRUSTED
-   ─────────                          ───────
-   mediator-llm  ── proposes ──►   mediator-core ── generates .thy ──►  mediator-prover
-   (Bedrock,                       (the reduction,                      (Isabelle/HOL —
-    LM Studio,                      receipts, analysis)                  the only authority)
-    council)     ◄── verdict ───   ◄──────────────────────────────────  Proved / Unknown / Error
-                                          │
-                                          ├──►  mediator-fairdiv   (Adjusted Winner + certificates)
-                                          └──►  mediator-tui / -web (operator cockpit · kind party view)
+   UNTRUSTED  (proposes)                 TRUSTED  (disposes)
+   ──────────────────────                ───────────────────
+   mediator-llm   ── proposes IR ──►  mediator-core ── .thy ──►  mediator-prover
+   (a council of open models,         (the reduction, the          (Isabelle/HOL —
+    Bedrock; a neutrality judge        cruxes, the receipts)         the only authority)
+    independent of the voice)   ◄── verdict ──  ◄────────────────  Proved / Unknown / Error
+                                             │
+              mediator-session  ◄────────────┤   the AI actually mediating (the point)
+              mediator-fairdiv  ◄────────────┤   certified-fair options (3 procedures)
+              mediator-ontology ◄────────────┤   genuine clash vs. just-different-words
+              mediator-audit    ◄────────────┘   signed, verifiable record of it all
 ```
-
-It's **HOL-shaped, not Hets-shaped**: one host (Isabelle/HOL) with the few logics
-we need shallow-embedded ([LogiKEy](https://www.sciencedirect.com/science/article/pii/S0004370219301110)/Benzmüller
-style) — the *alive* branch of this field — rather than many provers glued by
-morphisms (the dead branch).
 
 | crate | what it is |
 |---|---|
 | `mediator-types` | the frozen contract — pure data + trait seams |
-| `mediator-core` | the brain: Formula→Isabelle codegen, the reduction, the hash-chained receipt ledger |
+| `mediator-core` | the reduction: `Dispute` → Isabelle; isolates the *set* of cruxes; the receipt ledger |
 | `mediator-prover` | the trusted gate: drives `isabelle`, returns per-obligation `Proved`/`Unknown`/`Error` |
-| `mediator-fairdiv` | Brams–Taylor Adjusted Winner + envy-free / equitable / Pareto certificates |
-| `mediator-llm` | the untrusted operator + council (AWS Bedrock, LM Studio); degrades to a scripted operator offline |
-| `mediator-tui` | two projections of one analysis, in the terminal (ratatui) |
-| `mediator-web` | the same two faces as a simple, delightful htmx page (axum + maud) |
-| `mediator-session` | **the AI actually mediating** — the session state machine + the mediator's voice (a deterministic scripted brain and a live Bedrock brain) |
-| `mediator-demo` | the `mediator` binary — wires it all together on a scenario |
-| `isabelle/` | `Keystone.thy` (the proven foundation stone) + `lib/` (the deontic + defeasible normative layer) |
+| `mediator-fairdiv` | three certified procedures — Adjusted Winner, max-min egalitarian, split-the-difference — with envy-free / proportional / Pareto certificates |
+| `mediator-llm` | the untrusted council (diverse + moving to fully-open) + an independent neutrality judge; offline scripted fallback |
+| `mediator-session` | **the AI actually mediating** — the session, evidence, the adaptive (non-rigid) flow, and the mediator's voice |
+| `mediator-audit` | a signed, tamper-evident `MediationRecord` (ed25519 over a sha256 chain) anyone can `verify()` |
+| `mediator-ontology` | vocabulary negotiation — dissolves "disagreements" that are two words for one thing (the pushout of the alignment span; *honestly labeled exploratory*) |
+| `mediator-tui` / `mediator-web` | two kind front doors over one analysis — a terminal app and a warm htmx page |
+| `isabelle/` | `Keystone.thy` (the proven foundation stone) + `lib/` (the deontic + defeasible layer) |
 
-Two front doors, both *kind*: a terminal TUI and a minimalist web page. Same
-underlying analysis, two altitudes — the **party view** (warm, pared down, never a
-morphism, never a verdict-as-judgment) and the **operator cockpit** (the full
-graph, prover verdicts, and receipt chain, for the human supervisor + engineer
-flying as a pair).
+It's **HOL-shaped, not Hets-shaped**: one host (Isabelle/HOL) with the few logics we
+need shallow-embedded ([LogiKEy](https://www.sciencedirect.com/science/article/pii/S0004370219301110)/Benzmüller
+style) — the *alive* branch of this field.
 
 ## Run it
 
 Prerequisites: a Rust toolchain and Isabelle2025-2 (auto-located at
-`~/isabelle/Isabelle2025-2.app`; override with `MEDIATEOR_ISABELLE`).
+`~/isabelle/Isabelle2025-2.app`).
 
 ```sh
-./run.sh          # build + cache + web + open browser — one command, that's it
+./run.sh                       # build → cache → serve → open the browser
+cargo run -p mediator-session --bin intake -- "describe a real dispute in plain words"
+just demo | just tui | just web | just verify
 ```
 
-Everything runs **offline and deterministically** by default — the LLM operator
-falls back to a scripted formalizer so the demo never needs a network or an API
-key. Point it at Bedrock / LM Studio to let live models drive the kernel.
-
-Handy `just` targets (install: `cargo install just` or `brew install just`):
-
-```sh
-just demo         # CLI walkthrough on the roommate dispute
-just tui          # same, in the interactive terminal app
-just web          # web server only (expects caches; run just cache first)
-just cache        # regenerate all analysis caches via the full Isabelle pipeline
-just verify       # isabelle build -D isabelle + cargo test --workspace
-```
-
-See `DEMO.md` for a guided 60-second walkthrough of what to show and why it's
-impressive.
+Everything runs **offline and deterministically** by default — the live models
+fall back to a scripted voice so the demo never *needs* a network or a key. The
+public box drives live open models on Bedrock, behind per-request rate limits and a
+hard **$50 spend cap** (an AWS budget action cuts model access cold at the line).
 
 ## Disputes
 
-Five worked disputes ship in `scenarios/` — each one runs through the real
-Isabelle gate and ships with a precomputed analysis cache, so the web app opens
-on all of them instantly.
+Five worked disputes ship in `scenarios/`, each certified through the real Isabelle
+gate, plus `twocrux.json` (a dispute reducing to *two* contested questions at once).
 
-| Scenario | The story | The one open question |
+| Scenario | The story | The open question(s) it's handed back |
 |---|---|---|
-| `roommate` | Robin moves out; Sam holds the $1,200 deposit. A carpet stain and some shared furniture. | Is the stain chargeable damage, or ordinary wear? |
-| `freelance` | Maya hired Theo for a $5,000 website; she says it's missing features, he says he delivered the spec. | Did the work meet the agreed spec? |
-| `partnership` | Priya and Jordan wind down their studio; a one-year equity cliff and a contested departure date. | Did Jordan's departure breach the vesting agreement? |
-| `separation` | Alex and Sam part ways over a shared-apartment deposit — wall scuffs and a cracked tile. | Is the damage attributable to Alex, or ordinary wear? |
-| `siblings` | Two siblings divide a parent's estate; an $8,000 gift to one of them years ago. | Was that money an advance on the inheritance, or a gift? |
-
-In every one: the ledger is certified by arithmetic, an over-claim is refuted,
-and the whole money question is reduced to that single predicate — which the
-kernel **hands back undecided**, because it's a human question, not a provable
-one.
+| `roommate` | Robin moves out; Sam holds the $1,200 deposit; a carpet stain. | Is the stain chargeable damage, or ordinary wear? |
+| `freelance` | A $5,000 website: missing features, or delivered to spec? | Did the work meet the agreed spec? |
+| `partnership` | Co-founders wind down; an equity cliff and a contested departure date. | Did the departure breach the vesting agreement? |
+| `separation` | A shared-apartment deposit; wall scuffs and a cracked tile. | Is the damage attributable to one partner, or wear? |
+| `siblings` | Two siblings divide an estate; an $8,000 gift years ago. | Was that money an advance, or a gift? |
 
 ## Why this shape (the honest part)
 
-In the lineage of [WMT](https://emberian.github.io/world-model-trajectories/):
-the faithfulness of any formalization is a **seam**, and the only honest move is
-to make it cheap and visible, not to hide it.
+The faithfulness of any formalization is a **seam**, and the only honest move is to
+make it cheap and visible, not to hide it.
 
 - The kernel guarantees consistency *of the formalization* and the certified
-  ledger/division — **never** that it captured what you meant, and never that
-  anyone is morally right. That stays yours.
-- The prover may answer `Unknown` on hard goals. It is reported as `Unknown` —
-  **never** silently treated as consistent. (The crux comes back `Unknown` *on
-  purpose*: refusing to decide it is the honest answer.)
-- Where a dispute resists formalization, the system **says so** and routes around
-  it. The boundary of what can be formalized is itself a diagnosis: a fight that
-  won't formalize is usually about values or recognition, not facts — and naming
-  that is more useful than faking an answer.
+  ledger/division — **never** that it captured what you meant, never that anyone is
+  morally right. That stays yours.
+- The prover may answer `Unknown`. It is reported as `Unknown`, never silently as
+  consistent. The crux comes back `Unknown` *on purpose*.
+- Where a dispute resists formalization, the system **says so**. The boundary is
+  itself a diagnosis: a fight that won't formalize is usually about values or
+  recognition, and naming that beats faking an answer.
+- The **categorical / ontology** layer (mediation as the pushout of two
+  vocabularies) is genuinely exploratory — it earns its keep for transitive synonym
+  merges and well-typed aliasing, and is honest in its own docs about where a plain
+  heuristic would do as well. We're pushing it to find its limit, not pretending
+  we've found a theorem.
 
-No overclaim. The formal core is a supporting actor — maybe a fifth of the system
-— and that is correct, not a disappointment.
+No overclaim.
 
-## Lineage
+## Lineage & status
 
-Standing on: AGM belief revision (Alchourrón–Gärdenfors–Makinson), Dung
-argumentation, defeasible deontic logic (Governatori), default-logic-for-statutes
-([Catala](https://arxiv.org/abs/2103.03198)), shallow semantic embeddings in HOL
-([LogiKEy](https://www.sciencedirect.com/science/article/pii/S0004370219301110)),
-fair division (Brams–Taylor Adjusted Winner, Family\_Winner), and the
-"model proposes, prover disposes" pattern from the LLM-theorem-proving literature
-(DSP, Baldur, COPRA). The contribution is the honest *composition*, and the seam
-made cheap and visible. (Reading in `pdfs/`; design in `ARCHITECTURE.md`.)
+Standing on: AGM belief revision, Dung argumentation, defeasible deontic logic
+(Governatori), default-logic-for-statutes ([Catala](https://arxiv.org/abs/2103.03198)),
+shallow semantic embeddings in HOL ([LogiKEy](https://www.sciencedirect.com/science/article/pii/S0004370219301110)),
+fair division (Brams–Taylor), and "model proposes, prover disposes" from the
+LLM-theorem-proving literature (DSP, Baldur, COPRA). The contribution is the honest
+*composition*, and the peer-mediation discipline. (Design in `ARCHITECTURE.md`;
+reading in `pdfs/`.)
 
-## Status
+**Status:** real and live. Free-text disputes get certified through Isabelle; the
+AI conducts interactive, live mediations end to end; the record is signed and
+verifiable; the council is going fully open. Young, honest about its edges, and —
+if the frame above is even half right — worth building carefully and in the open.
 
-Real and live. The keystone builds; the kernel certifies five disputes through
-real Isabelle; and the **session** — the AI actually mediating, interactively and
-live — runs end to end and is deployed (password-protected) for demo. Still young,
-still honest about its edges, but the core of the vision works: a person can be
-heard by an impartial guide with no stake in the outcome, and shown the fair,
-checked shape of their disagreement.
+Sharing this with the cyborgists, who will see further than two of us can. If
+you're reading it there: the seams are marked, the skepticism is invited, and the
+constitution is the part that matters. Pull on any of it.
 
 ## License
 
