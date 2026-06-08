@@ -102,6 +102,40 @@ on (more than you thought); here's the one real question, which is yours; here a
 fair options.* The verdict is never "you're wrong." It's *here is the smallest world
 that holds you both.*
 
+## Forward constitutions (prevention, not just cure)
+
+The same humility runs the other direction in time. Most disputes were *foreseeable* —
+the roommates knew a deposit fight could come; the co-founders knew a departure might be
+contested. So instead of waiting for the breakup, **certify the agreement before anyone's
+angry.** A *pact* names its own question-space up front — the value-laden questions the
+two of them agree to leave open, and the measured dials they agree on — plus a set of
+if-this-then-that clauses. The prover then certifies, over **every world the pact named**,
+that it is **complete** (every situation fires some clause — no gap it's silent on) and
+**non-contradictory** (no situation fires two clauses that disagree), while the human
+value-predicates stay **uninterpreted** — still handed back `Unknown` at dispute time.
+*Don't mediate the breakup; prove the relationship resolves every breakup it named.*
+
+It's a real trichotomy, and it refuses to overclaim:
+
+- **`Certified`** — "this agreement handles every situation you named, and no two rules collide."
+- **`Inconsistent`** — *here is exactly when two rules collide*: a concrete world (these
+  facts, this dial value) where two clauses demand different amounts.
+- **`Refused`** — *here is a situation you left unhandled*: the open subgoal **is** the
+  diagnosis, in plain words ("a cliff value falls through the clauses").
+
+The ceiling, stated everywhere it shows: complete and consistent **relative to the
+questions the pact named** — never that it named every question. A predicate nobody thought
+to name can't be detected; that residue is the faithfulness seam, pushed to design time,
+and it stays the humans'.
+
+And because pacts of one *template* share a declared vocabulary, they **collide by
+construction** — so a **commons of pacts** carries signal where a commons of ad-hoc disputes
+(whose cruxes never collide) cannot. It reports *certified controversy* — "here are the ways
+people resolved this clause, each signed and re-verifiable" — never "yours should be X," and
+publishes its corpus size as the headline (a handful of signed choices is *not* a settled
+rule, and it says so). Live at **[/pacts](https://mediateor.fg-goose.online/pacts)** (the
+shipped templates: roommate move-out, founder vesting, creative-credit, cohabitation).
+
 ## The constitution (the line between the two futures)
 
 These are not features. They are the difference between a peace technology and
@@ -114,10 +148,10 @@ automated domination in a velvet glove:
 - **Auditable by anyone.** Trust comes from the *verifiable record*, not the
   arbiter's virtue. (`quis custodiet ipsos custodes`, answered structurally: the
   judge can't lie about the facts, can't hide its reasoning, can't overstep.)
-- **No proprietary power enthroned.** The council is moving to *fully open-weights*
-  models (DeepSeek, Mistral Large, Qwen — and as soon as one's serverless-cheap,
-  the biggest open NVIDIA Nemotron), spanning providers so no single maker's bias
-  is the law. Diverse minds, none of them the throne.
+- **No proprietary power enthroned.** The council is now *fully open-weights* — the
+  mediator's voice is **Qwen3-VL 235B**, the deliberating panel is **Mistral Large 3 +
+  DeepSeek V3.2 + Qwen**, and the neutrality judge is independent of the voice — spanning
+  makers so no single one's bias is the law. Diverse minds, none of them the throne.
 
 ## Architecture
 
@@ -152,9 +186,11 @@ plain, kind conversation.
 | `mediator-llm` | the untrusted council (diverse + moving to fully-open) + an independent neutrality judge; offline scripted fallback |
 | `mediator-session` | **the AI actually mediating** — the session, evidence, the adaptive (non-rigid) flow, and the mediator's voice |
 | `mediator-audit` | a signed, tamper-evident `MediationRecord` (ed25519 over a sha256 chain) anyone can `verify()` |
+| `mediator-pact` | **forward constitutions**: certify a two-party agreement *complete + non-contradictory* over its declared question-space (value-predicates left free), else refuse it with the concrete gap/clash; signed cert |
+| `mediator-pact-commons` | a *commons of pacts* — same-template pacts collide by construction, so it reports certified *controversy* (signed, re-verifiable), the corpus size as the headline |
 | `mediator-ontology` | vocabulary negotiation — dissolves "disagreements" that are two words for one thing (the pushout of the alignment span; *honestly labeled exploratory*) |
 | `mediator-tui` / `mediator-web` | two kind front doors over one analysis — a terminal app and a warm htmx page |
-| `isabelle/` | `Keystone.thy` (the proven foundation stone) + `lib/` (the deontic + defeasible layer) |
+| `isabelle/` | `Keystone.thy` (the proven foundation stone), `Pact.thy` (the forward-constitution proof shape) + `lib/` (the deontic + defeasible layer, incl. dyadic contrary-to-duty) |
 
 It's **HOL-shaped, not Hets-shaped**: one host (Isabelle/HOL) with the few logics we
 need shallow-embedded ([LogiKEy](https://www.sciencedirect.com/science/article/pii/S0004370219301110)/Benzmüller
@@ -168,6 +204,8 @@ Prerequisites: a Rust toolchain and Isabelle2025-2 (auto-located at
 ```sh
 ./run.sh                       # build → cache → serve → open the browser
 cargo run -p mediator-session --bin intake -- "describe a real dispute in plain words"
+cargo run -p mediator-pact --bin pact -- scenarios/pacts/roommate_moveout.json   # certify a pact
+cargo run -p mediator-pact-commons                                               # the commons of pacts
 just demo | just tui | just web | just verify
 ```
 
@@ -221,9 +259,11 @@ LLM-theorem-proving literature (DSP, Baldur, COPRA). The contribution is the hon
 reading in `pdfs/`.)
 
 **Status:** real and live. Free-text disputes get certified through Isabelle; the
-AI conducts interactive, live mediations end to end; the record is signed and
-verifiable; the council is going fully open. Young, honest about its edges, and —
-if the frame above is even half right — worth building carefully and in the open.
+AI conducts interactive, live mediations end to end; **forward constitutions certify an
+agreement complete + non-contradictory before any dispute** (the live
+[/pacts](https://mediateor.fg-goose.online/pacts) gallery); the record is signed and
+verifiable; the council is **fully open**. Young, honest about its edges, and — if the
+frame above is even half right — worth building carefully and in the open.
 
 Sharing this with the cyborgists, who will see further than two of us can. If
 you're reading it there: the seams are marked, the skepticism is invited, and the
