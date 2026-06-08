@@ -8,3 +8,4 @@ session "Mediator_Lib" in "lib" = HOL +
   theories
     Mediator
     Roommate
+    DyadicDeontic
