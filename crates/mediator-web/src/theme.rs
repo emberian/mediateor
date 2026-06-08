@@ -280,6 +280,39 @@ section:first-of-type .op-h { margin-top: 0; }
 .site-footer .dot { opacity: .5; }
 .site-footer span:last-child { font-style: italic; }
 
+/* ── live formalization panel ────────────────────────────────────────── */
+.formalize-card { border-left: 3px solid var(--blue); background: var(--surface); }
+.formalize-input-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
+.formalize-input {
+  flex: 1; min-width: 0;
+  font-family: var(--sans); font-size: var(--t-0); color: var(--text);
+  background: var(--bg); border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm); padding: .45rem .75rem;
+  transition: border-color .15s;
+}
+.formalize-input:focus { outline: none; border-color: var(--blue); }
+.formalize-spinner { font-size: var(--t--1); color: var(--muted); }
+.formalize-hint { font-size: var(--t--1); color: var(--muted); margin-top: .25rem; }
+.formalize-caption { font-size: var(--t--1); color: var(--muted); font-style: italic; margin-top: .9rem; padding-top: .6rem; border-top: 1px solid var(--border); }
+.formalize-result { margin-top: .8rem; }
+.formalize-off, .formalize-error { color: var(--muted); font-size: var(--t--1); margin-top: .5rem; }
+.formalize-error { color: var(--red); }
+
+/* reading cards (per-model) */
+.council-result { display: grid; gap: .75rem; }
+.reading-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.2rem; background: var(--bg-2); }
+.reading-head { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
+.reading-model { color: var(--text-2); font-size: var(--t--1); }
+.reading-english { font-size: var(--t-1); font-family: var(--serif); color: var(--text); line-height: 1.3; margin: .4rem 0; }
+.reading-issues { list-style: none; margin: .3rem 0; }
+.reading-issues li { font-size: var(--t--1); color: var(--amber); padding-left: 1rem; position: relative; }
+.reading-issues li::before { content: "⚠"; position: absolute; left: 0; }
+.reading-details { margin-top: .5rem; font-size: var(--t--1); }
+.reading-details summary { color: var(--muted); cursor: pointer; }
+.reading-details summary:hover { color: var(--text-2); }
+.reading-ir, .reading-raw { margin-top: .35rem; font-family: var(--mono); font-size: .72rem; color: var(--text-2); white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: .4rem .6rem; }
+.consensus-line { margin-top: .5rem; font-size: var(--t--1); color: var(--text-2); display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+
 /* ── responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 560px) {
   .page { padding: 1rem 1rem 4rem; }

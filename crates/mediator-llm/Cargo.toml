@@ -8,6 +8,10 @@ license.workspace = true
 name = "formalize"
 path = "src/bin/formalize.rs"
 
+[[bin]]
+name = "live-formalize"
+path = "src/bin/live_formalize.rs"
+
 [dependencies]
 mediator-types = { workspace = true }
 mediator-core = { workspace = true }
@@ -15,3 +19,18 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 ureq = { version = "2", features = ["json"] }
+
+# ── live Bedrock council (the `live` module) ─────────────────────────────────
+# TLS: we deliberately avoid the default `rustls-aws-lc` connector (it pulls
+# aws-lc-sys, which needs cmake and frequently fails to build on macOS). Instead
+# we disable default features everywhere and enable the *ring*-backed rustls
+# connector via aws-sdk-bedrockruntime's `rustls` feature (= tls-rustls =
+# legacy-rustls-ring) plus an explicit aws-smithy-runtime/tls-rustls so the
+# ring hyper connector is compiled in and auto-detected by aws-config.
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros"] }
+aws-config = { version = "1", default-features = false, features = ["rt-tokio", "credentials-process", "sso"] }
+aws-sdk-bedrockruntime = { version = "1", default-features = false, features = ["rustls", "rt-tokio", "behavior-version-latest"] }
+aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "tls-rustls", "rt-tokio"] }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }

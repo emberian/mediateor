@@ -17,9 +17,11 @@ mod load;
 mod theme;
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::{
+    Form,
     Router,
     extract::{Path, State},
     http::StatusCode,
@@ -27,11 +29,49 @@ use axum::{
     routing::{get, post},
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Term};
+use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Sig, Term};
 use tokio::sync::RwLock;
 
 pub use load::{DisputeRecord, discover_disputes, load_record, scenarios_dir};
 use theme::CSS;
+
+// ─────────────────────────── rate limiter ────────────────────────────────────
+
+/// A very simple token-bucket rate limiter.
+/// Allows one call per `min_interval`; shared across all /formalize requests.
+struct RateLimiter {
+    min_interval: Duration,
+    last_allowed: Mutex<Option<Instant>>,
+}
+
+impl RateLimiter {
+    fn new(min_interval: Duration) -> Self {
+        Self {
+            min_interval,
+            last_allowed: Mutex::new(None),
+        }
+    }
+
+    /// Returns `true` if the call is allowed (and records the time).
+    fn allow(&self) -> bool {
+        let mut guard = self.last_allowed.lock().unwrap();
+        let now = Instant::now();
+        match *guard {
+            None => {
+                *guard = Some(now);
+                true
+            }
+            Some(last) => {
+                if now.duration_since(last) >= self.min_interval {
+                    *guard = Some(now);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
 
 // ──────────────────────────────── AppState ───────────────────────────────────
 
@@ -65,11 +105,28 @@ impl LoadedDispute {
     fn party(&self, id: &str) -> Option<&Party> {
         self.dispute.parties.iter().find(|p| p.id == id)
     }
+
+    /// Combined signature: the union of all parties' symbols (deduped by name).
+    fn combined_sig(&self) -> Vec<Sig> {
+        let mut sig: Vec<Sig> = Vec::new();
+        for party in &self.dispute.parties {
+            for s in &party.signature {
+                if !sig.iter().any(|d| d.name == s.name) {
+                    sig.push(s.clone());
+                }
+            }
+        }
+        sig
+    }
 }
 
 /// What the server renders from. Holds many disputes; decoupled from the kernel.
 pub struct AppState {
     pub disputes: Vec<LoadedDispute>,
+    /// Whether the live LLM feature is enabled (env `MEDIATEOR_LIVE_LLM`).
+    pub live_llm_enabled: bool,
+    /// Simple global rate limiter for /formalize calls.
+    rate_limiter: RateLimiter,
 }
 
 impl AppState {
@@ -83,7 +140,20 @@ impl AppState {
                 .cmp(&rank(&b.id))
                 .then_with(|| a.id.cmp(&b.id))
         });
-        Self { disputes }
+        let live_llm_enabled = std::env::var("MEDIATEOR_LIVE_LLM")
+            .map(|v| {
+                !v.is_empty()
+                    && v != "0"
+                    && v.to_ascii_lowercase() != "false"
+                    && v.to_ascii_lowercase() != "no"
+            })
+            .unwrap_or(false);
+        Self {
+            disputes,
+            live_llm_enabled,
+            // One call per 4 seconds globally — cheap but prevents spam.
+            rate_limiter: RateLimiter::new(Duration::from_secs(4)),
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<&LoadedDispute> {
@@ -156,6 +226,7 @@ pub fn router(state: AppState) -> Router {
             "/settlement/:dispute_id/:idx/counter",
             post(settlement_counter),
         )
+        .route("/formalize/:dispute_id", post(formalize_claim))
         .nest_service("/static", tower_http::services::ServeDir::new(static_dir))
         .with_state(shared)
 }
@@ -466,6 +537,11 @@ async fn party_view(
                     (settlement_card(&d.id, idx, s, &accepted[idx], &party_id, &you))
                 }
             }
+        }
+
+        // (6) "Say it in your own words" — live formalization panel (gated).
+        @if state.live_llm_enabled {
+            (live_formalize_panel(&d.id))
         }
 
         section .reveal .closing {
@@ -973,6 +1049,188 @@ fn humanize_settlement(explanation: &str) -> String {
             .to_string();
     }
     first.to_string()
+}
+
+// ─────────────────────── live formalization panel ────────────────────────────
+
+/// The "Say it in your own words" panel. Shown only when `live_llm_enabled`.
+fn live_formalize_panel(dispute_id: &str) -> Markup {
+    html! {
+        section .reveal .step #live-formalize {
+            span .step-n { "?" }
+            h2 { "Say it in your own words" }
+            p .step-lede {
+                "Describe what you believe is true in plain English. "
+                "The council will try to read it as a formal statement — "
+                "so you can see how a prover would understand it."
+            }
+            div .card .formalize-card {
+                form
+                    hx-post=(format!("/formalize/{dispute_id}"))
+                    hx-target="#formalize-result"
+                    hx-swap="innerHTML"
+                    hx-indicator="#formalize-spinner"
+                    {
+                    div .formalize-input-row {
+                        input .formalize-input
+                            type="text"
+                            name="claim"
+                            placeholder="e.g. the stain was ordinary wear and tear"
+                            maxlength="240"
+                            autocomplete="off"
+                            {}
+                        button .btn .btn-accept type="submit" { "Formalize" }
+                        span #formalize-spinner .htmx-indicator .formalize-spinner { "…" }
+                    }
+                    p .formalize-hint {
+                        "Up to 240 characters. "
+                        "Use the symbols from this dispute — the more specific, the better."
+                    }
+                }
+                div #formalize-result .formalize-result {}
+                p .formalize-caption {
+                    "The council proposes; a prover would check this next — "
+                    "this is the formalization step, live. Nothing here has been proved."
+                }
+            }
+        }
+    }
+}
+
+/// The compact HTML fragment for one model's reading.
+fn reading_fragment(r: &mediator_llm::live::Reading) -> Markup {
+    let valid_pill = if r.valid {
+        html! { span .pill .pill-green { "valid" } }
+    } else {
+        html! { span .pill .pill-amber { "needs review" } }
+    };
+
+    let formal_ir = r.formula.as_ref().map(|f| {
+        use mediator_core::render::formula_to_isabelle;
+        let isa = formula_to_isabelle(f);
+        let json = serde_json::to_string_pretty(f).unwrap_or_default();
+        html! {
+            details .reading-details {
+                summary { "Formal IR" }
+                pre .reading-ir { (isa) }
+                pre .reading-ir { (json) }
+            }
+        }
+    });
+
+    html! {
+        div .reading-card {
+            div .reading-head {
+                (valid_pill)
+                strong .reading-model { (r.model.clone()) }
+            }
+            @if !r.issues.is_empty() {
+                ul .reading-issues {
+                    @for issue in &r.issues {
+                        li { (issue) }
+                    }
+                }
+            }
+            // The wow — prominent English render.
+            p .reading-english { (r.english.clone()) }
+            // Formal IR in a collapsible.
+            @if let Some(frag) = formal_ir { (frag) }
+            // Raw text in a collapsible.
+            details .reading-details {
+                summary { "Raw model output" }
+                pre .reading-raw { (r.raw.clone()) }
+            }
+        }
+    }
+}
+
+/// Form payload for /formalize.
+#[derive(serde::Deserialize)]
+struct FormalizeForm {
+    #[serde(default)]
+    claim: String,
+}
+
+/// `POST /formalize/:dispute_id` — returns an htmx HTML fragment.
+async fn formalize_claim(
+    Path(dispute_id): Path<String>,
+    State(state): State<SharedState>,
+    Form(form): Form<FormalizeForm>,
+) -> impl IntoResponse {
+    // Feature gate.
+    if !state.live_llm_enabled {
+        let frag = html! {
+            p .formalize-off {
+                "Live formalization is off in this build. "
+                "Set " span .mono { "MEDIATEOR_LIVE_LLM=1" } " to enable it."
+            }
+        };
+        return (StatusCode::OK, frag).into_response();
+    }
+
+    // Dispute must exist.
+    let Some(d) = state.get(&dispute_id) else {
+        let frag = html! { p .formalize-error { "Unknown dispute." } };
+        return (StatusCode::NOT_FOUND, frag).into_response();
+    };
+
+    // Input length guard (≤ 240 chars).
+    let claim = form.claim.trim().to_string();
+    if claim.is_empty() {
+        let frag = html! {
+            p .formalize-hint { "Please enter a claim to formalize." }
+        };
+        return (StatusCode::OK, frag).into_response();
+    }
+    if claim.chars().count() > 240 {
+        let frag = html! {
+            p .formalize-error {
+                "That's a bit long (max 240 characters). "
+                "Try a shorter, more direct statement."
+            }
+        };
+        return (StatusCode::OK, frag).into_response();
+    }
+
+    // Rate limiter.
+    if !state.rate_limiter.allow() {
+        let frag = html! {
+            p .formalize-hint {
+                "One moment — the council is still thinking. Try again in a few seconds."
+            }
+        };
+        return (StatusCode::OK, frag).into_response();
+    }
+
+    // Call the live council.
+    let sig = d.combined_sig();
+    let cfg = mediator_llm::live::LiveConfig::default();
+    match mediator_llm::live::council_formalize_live(&claim, &sig, &cfg).await {
+        Ok(council) => {
+            let frag = html! {
+                div .council-result {
+                    @for r in &council.readings {
+                        (reading_fragment(r))
+                    }
+                    div .consensus-line {
+                        span .pill .pill-blue { "consensus" }
+                        " "
+                        (council.consensus.clone())
+                    }
+                }
+            };
+            (StatusCode::OK, frag).into_response()
+        }
+        Err(e) => {
+            let frag = html! {
+                p .formalize-error {
+                    "The council couldn't reach Bedrock right now. "
+                    "(" (e.to_string()) ")"
+                }
+            };
+            (StatusCode::OK, frag).into_response()
+        }
+    }
 }
 
 // ─────────────────────────────────── tests ───────────────────────────────────

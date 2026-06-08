@@ -26,6 +26,8 @@ use mediator_types::{Formula, LlmOperator, Sig, Sort, Term};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+pub mod live;
+
 // ─────────────────────────── ScriptedOperator ────────────────────────────
 
 /// Offline fallback: returns pre-baked formalizations for the roommate demo.

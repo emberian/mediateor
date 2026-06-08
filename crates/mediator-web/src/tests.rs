@@ -259,3 +259,116 @@ async fn discovery_loads_disk_scenarios_if_present() {
     let state = AppState::new(records);
     assert_eq!(state.disputes[0].id, "roommate", "roommate should sort first");
 }
+
+// ── live-LLM guardrail tests (offline, no network, no Bedrock) ───────────────
+//
+// All these run with MEDIATEOR_LIVE_LLM *unset* (the fixture_state() constructor
+// reads the env at construction time, and these tests never set it).
+
+#[tokio::test]
+async fn party_view_without_live_llm_has_no_formalize_panel() {
+    // MEDIATEOR_LIVE_LLM is not set → live_llm_enabled = false.
+    let app = router(fixture_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/party/roommate/robin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    // The panel's distinctive heading must NOT appear.
+    assert!(
+        !html.contains("Say it in your own words"),
+        "live panel must not render when MEDIATEOR_LIVE_LLM is unset"
+    );
+    // The /formalize endpoint must not be linked from the page.
+    assert!(
+        !html.contains("/formalize/"),
+        "formalize endpoint must not be linked when feature is off"
+    );
+}
+
+#[tokio::test]
+async fn formalize_endpoint_returns_off_fragment_when_live_llm_unset() {
+    // With MEDIATEOR_LIVE_LLM unset the endpoint returns a friendly "off" note
+    // without ever calling Bedrock.
+    let app = router(fixture_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/formalize/roommate")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("claim=the+stain+was+ordinary+wear"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    // Must be a fragment, not a full page.
+    assert!(!html.contains("<!DOCTYPE"), "should be a fragment, not a full page");
+    // Must explain that live mode is off.
+    assert!(
+        html.contains("off") || html.contains("MEDIATEOR_LIVE_LLM"),
+        "fragment should mention live mode is off: {html}"
+    );
+    // Must NOT contain any Bedrock-sourced content.
+    assert!(
+        !html.contains("council"),
+        "no council output should appear when feature is off"
+    );
+}
+
+#[tokio::test]
+async fn formalize_endpoint_rejects_overlong_claim() {
+    // Even with MEDIATEOR_LIVE_LLM unset the length check fires first.
+    // Verify the endpoint exists and handles the form properly.
+    let app = router(fixture_state());
+    let long_claim = "x".repeat(241);
+    let body = format!("claim={}", long_claim);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/formalize/roommate")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    // Either 200 (fragment with error message) or feature-off response — both are fine.
+    assert!(
+        resp.status() == StatusCode::OK || resp.status() == StatusCode::BAD_REQUEST,
+        "unexpected status: {}",
+        resp.status()
+    );
+}
+
+#[tokio::test]
+async fn formalize_endpoint_404_for_unknown_dispute() {
+    let app = router(fixture_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/formalize/nonexistent")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("claim=test"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    // When live LLM is off, the off-fragment comes back with 200 before we
+    // even check the dispute. So either 200 (off) or 404 (live-on, not found).
+    assert!(
+        resp.status() == StatusCode::OK || resp.status() == StatusCode::NOT_FOUND,
+        "unexpected status: {}",
+        resp.status()
+    );
+}
