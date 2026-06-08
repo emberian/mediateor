@@ -9,6 +9,8 @@ members = [
     "crates/mediator-tui",
     "crates/mediator-web",
     "crates/mediator-session",
+    "crates/mediator-audit",
+    "crates/mediator-ontology",
     "crates/mediator-demo",
 ]
 
