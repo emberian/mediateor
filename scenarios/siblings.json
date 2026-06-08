@@ -1,0 +1,79 @@
+{
+  "title": "Two siblings, one estate — dividing what a parent left behind",
+  "parties": [
+    {
+      "id": "alex",
+      "display_name": "Alex (the older sibling)",
+      "signature": [
+        { "name": "gift_was_advance", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the $8,000 their parent gave Jordan counts as an advance on inheritance" }
+      ]
+    },
+    {
+      "id": "jordan",
+      "display_name": "Jordan (the younger sibling)",
+      "signature": [
+        { "name": "share_reduced", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Jordan's cash share is reduced by the earlier gift" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the gift amount Alex verbally claimed, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "a1", "party": "alex",
+      "nl": "The money Mum gave Jordan for the car was an advance on the inheritance.",
+      "formula": { "Atom": { "App": ["gift_was_advance", []] } },
+      "english_render": "The earlier gift counts as an advance on inheritance.",
+      "weight": 6, "defeasible": true, "active": true
+    },
+    {
+      "id": "j1", "party": "jordan",
+      "nl": "That money was a birthday gift, not an advance on anything.",
+      "formula": { "Not": { "Atom": { "App": ["gift_was_advance", []] } } },
+      "english_render": "It is not the case that the earlier gift counts as an advance on inheritance.",
+      "weight": 6, "defeasible": true, "active": true
+    },
+    {
+      "id": "a2", "party": "alex",
+      "nl": "I'm sure the gift was around ten thousand dollars.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 1000000 } ] },
+      "english_render": "Alex's stated gift amount is $10,000.00.",
+      "weight": 2, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["share_reduced", []] } },
+        { "Atom": { "App": ["gift_was_advance", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 4000000,
+    "items": [
+      { "id": "funeral", "label": "Shared funeral costs", "amount_cents": 600000,
+        "asserted_by": "alex", "disputed": false },
+      { "id": "advance_gift", "label": "Earlier gift to Jordan", "amount_cents": 800000,
+        "asserted_by": "alex", "disputed": true }
+    ]
+  },
+  "contested_items": [
+    { "id": "piano", "label": "The family piano", "divisible": false },
+    { "id": "paintings", "label": "Mum's paintings", "divisible": false },
+    { "id": "china", "label": "The good china set", "divisible": false },
+    { "id": "tools", "label": "Dad's woodworking tools", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "alex", "item": "piano", "points": 20 },
+    { "party": "alex", "item": "paintings", "points": 45 },
+    { "party": "alex", "item": "china", "points": 10 },
+    { "party": "alex", "item": "tools", "points": 25 },
+    { "party": "jordan", "item": "piano", "points": 45 },
+    { "party": "jordan", "item": "paintings", "points": 20 },
+    { "party": "jordan", "item": "china", "points": 25 },
+    { "party": "jordan", "item": "tools", "points": 10 }
+  ]
+}

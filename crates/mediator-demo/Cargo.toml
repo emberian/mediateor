@@ -10,7 +10,9 @@ path = "src/main.rs"
 
 [dependencies]
 mediator-types = { workspace = true }
+mediator-core = { workspace = true }
+mediator-prover = { workspace = true }
+mediator-fairdiv = { workspace = true }
+mediator-tui = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-# wired to the rest at integration time:
-# mediator-core, mediator-prover, mediator-fairdiv, mediator-llm, mediator-tui

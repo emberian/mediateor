@@ -1,0 +1,79 @@
+{
+  "title": "Co-founder dissolution — Priya and Jordan winding down their startup",
+  "parties": [
+    {
+      "id": "priya",
+      "display_name": "Priya (remaining co-founder)",
+      "signature": [
+        { "name": "departure_breached_vesting", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Jordan's departure constituted a breach of the vesting cliff agreement" }
+      ]
+    },
+    {
+      "id": "jordan",
+      "display_name": "Jordan (departing co-founder)",
+      "signature": [
+        { "name": "clawback_applies", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the equity clawback clause is triggered by Jordan's departure" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the total value of business assets Jordan verbally claimed, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "r1", "party": "priya",
+      "nl": "Jordan left before the one-year cliff, so the vesting agreement was breached and the clawback applies.",
+      "formula": { "Atom": { "App": ["departure_breached_vesting", []] } },
+      "english_render": "Jordan's departure breached the vesting cliff agreement.",
+      "weight": 8, "defeasible": false, "active": true
+    },
+    {
+      "id": "s1", "party": "jordan",
+      "nl": "I left after the cliff date — the vesting agreement was not breached, and no clawback is owed.",
+      "formula": { "Not": { "Atom": { "App": ["departure_breached_vesting", []] } } },
+      "english_render": "It is not the case that Jordan's departure breached the vesting cliff agreement.",
+      "weight": 8, "defeasible": false, "active": true
+    },
+    {
+      "id": "s2", "party": "jordan",
+      "nl": "The total value of the shared business assets is thirty-five thousand dollars.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 3500000 } ] },
+      "english_render": "Jordan's claimed total value of business assets is $35,000.00.",
+      "weight": 3, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["clawback_applies", []] } },
+        { "Atom": { "App": ["departure_breached_vesting", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 3200000,
+    "items": [
+      { "id": "cash_account", "label": "Shared business checking account", "amount_cents": 1800000,
+        "asserted_by": "priya", "disputed": false },
+      { "id": "clawback_amount", "label": "Equity clawback (15% of vested shares value)", "amount_cents": 1200000,
+        "asserted_by": "priya", "disputed": true }
+    ]
+  },
+  "contested_items": [
+    { "id": "dev_laptop", "label": "Development laptop (company-purchased)", "divisible": false },
+    { "id": "office_furniture", "label": "Office furniture and standing desk", "divisible": false },
+    { "id": "brand_assets", "label": "Brand identity and design files", "divisible": false },
+    { "id": "domain_portfolio", "label": "Company domain portfolio", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "priya", "item": "dev_laptop", "points": 20 },
+    { "party": "priya", "item": "office_furniture", "points": 15 },
+    { "party": "priya", "item": "brand_assets", "points": 45 },
+    { "party": "priya", "item": "domain_portfolio", "points": 20 },
+    { "party": "jordan", "item": "dev_laptop", "points": 50 },
+    { "party": "jordan", "item": "office_furniture", "points": 30 },
+    { "party": "jordan", "item": "brand_assets", "points": 10 },
+    { "party": "jordan", "item": "domain_portfolio", "points": 10 }
+  ]
+}

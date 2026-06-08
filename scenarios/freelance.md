@@ -1,0 +1,3 @@
+Maya hired Theo to build a website for her small business. They agreed on a $5,000 fee — half upfront, half on delivery — but now that the site is live, Maya says it's missing half the features they scoped together, and Theo says he delivered exactly what was agreed.
+
+The kernel certifies the contract math ($2,000 already paid, $3,000 in dispute), refutes Theo's off-the-cuff "$5,500 total" figure against the signed itemization, and reduces the entire payment question to one undecided point: did the work meet the agreed spec? That question — a genuine difference of professional judgment — is handed back to the humans, not decided.

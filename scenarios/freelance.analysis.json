@@ -1,0 +1,131 @@
+{
+  "analysis": {
+    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "dissolved": [
+      "The $5500.00-vs-$5000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $5000.00."
+    ],
+    "genuine_conflicts": [],
+    "ledger_findings": [
+      "$3000.00 back if the stain is ordinary wear; $0.00 back if it counts as damage.",
+      "The verbal figure of $5500.00 in deductions is not what the itemization supports — the itemized deductions total $5000.00."
+    ],
+    "ledger_refund_cents": 300000,
+    "settlements": [
+      {
+        "allocations": [
+          [
+            "domain_hosting",
+            "maya"
+          ],
+          [
+            "logo_files",
+            "maya"
+          ],
+          [
+            "design_assets",
+            "theo"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Adjusted Winner settlement:\n  Domain and hosting accounts (prepaid 1 year) → maya (whole item)\n  Logo and brand asset files → maya (whole item)\n  Design mockup files and style guide → theo (whole item)\n  Website source code repository → split: 14.3% to maya, 85.7% to theo\nFinal point totals: maya = 68.5714, theo = 68.5714\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
+        "label": "Adjusted Winner",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "maya",
+            68.57142857142857
+          ],
+          [
+            "theo",
+            68.57142857142858
+          ]
+        ],
+        "splits": [
+          [
+            "source_code",
+            0.14285714285714285
+          ]
+        ]
+      }
+    ],
+    "shared_core": [
+      "You both stipulate: Client owes final payment exactly when work met spec.",
+      "You both agree the initial deposit payment (50%) was $2000.00 and comes out of the deposit.",
+      "The deposit held is $5000.00."
+    ]
+  },
+  "receipts": [
+    {
+      "detail": {
+        "n_axioms": 1,
+        "n_obligations": 6,
+        "obligations": [
+          "refund_damage_world",
+          "refund_wear_world",
+          "over_claim_refuted",
+          "crux_iff",
+          "crux_is_damage",
+          "crux_is_wear"
+        ],
+        "theory": "Mediator_Probe"
+      },
+      "hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "op": "build_preamble",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seq": 0,
+      "verdict": null
+    },
+    {
+      "detail": {
+        "damage_world": "Proved",
+        "refund_if_damage_cents": 0,
+        "refund_if_wear_cents": 300000,
+        "wear_world": "Proved"
+      },
+      "hash": "bb879e13cfeadcfa1d09e5616e3fc3079406dcc02560a76eb76d4d56d364af79",
+      "op": "verify_ledger",
+      "prev_hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "seq": 1,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "claimed_total_cents": 550000,
+        "itemized_total_cents": 500000,
+        "verdict": "Proved"
+      },
+      "hash": "c2369446728b04a56b7e08433a34c2975f6b51e5ce8a3e63ecc66e5d929d653e",
+      "op": "refute_overclaim",
+      "prev_hash": "bb879e13cfeadcfa1d09e5616e3fc3079406dcc02560a76eb76d4d56d364af79",
+      "seq": 2,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "crux_iff": "Proved",
+        "crux_is_damage": "Unknown",
+        "crux_is_wear": "Unknown"
+      },
+      "hash": "4c9d7411588bc73fb6b2d43f53c696d9fba4db5694873671c67c2f831ee31ae7",
+      "op": "isolate_crux",
+      "prev_hash": "c2369446728b04a56b7e08433a34c2975f6b51e5ce8a3e63ecc66e5d929d653e",
+      "seq": 3,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "envy_free": true,
+        "labels": [
+          "Adjusted Winner"
+        ],
+        "n_settlements": 1
+      },
+      "hash": "5ff346d0ab0f4501ecdec61dacf005f7918fad0ba330a1cf3d94722ce75a593e",
+      "op": "fair_division",
+      "prev_hash": "4c9d7411588bc73fb6b2d43f53c696d9fba4db5694873671c67c2f831ee31ae7",
+      "seq": 4,
+      "verdict": null
+    }
+  ]
+}

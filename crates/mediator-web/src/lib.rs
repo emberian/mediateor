@@ -1,176 +1,168 @@
-//! `mediator-web` — a simple, delightful, minimalist **htmx** front end.
+//! `mediator-web` — a simple, delightful, portfolio-quality **htmx** front end.
 //!
-//! Server-rendered HTML via `maud` + tiny htmx interactions.
-//! Two faces of one `Analysis`, same as the TUI:
-//!   - A kind, warm party view (for Robin or Sam)
-//!   - An operator cockpit (raw facts, hashes, crux status)
+//! Server-rendered HTML via `maud` + a few tiny htmx interactions. No SPA, no
+//! build step. Two faces of one `Analysis`, plus a calm gallery over *every*
+//! dispute in `scenarios/`:
 //!
-//! No build step, no SPA. Just warm pages a frightened roommate could love.
+//!   - `GET /`                          — the gallery of disputes
+//!   - `GET /dispute/:id`               — choose your seat
+//!   - `GET /party/:dispute/:party`     — the gentle, guided party reveal
+//!   - `GET /operator/:dispute`         — the operator cockpit (provenance)
+//!
+//! The people in a dispute never see a formula or the word "wrong". The
+//! operator sees the certified ledger findings, the crux verdict, and the
+//! hash-chained receipt ledger — provenance you can point at.
 
+mod load;
+mod theme;
+
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::{
     Router,
     extract::{Path, State},
-    routing::{get, post},
-    response::IntoResponse,
     http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
 };
-use maud::{html, Markup, DOCTYPE, PreEscaped};
-use mediator_types::{Analysis, Dispute, Settlement};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
+use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Term};
 use tokio::sync::RwLock;
+
+pub use load::{DisputeRecord, discover_disputes, load_record, scenarios_dir};
+use theme::CSS;
 
 // ──────────────────────────────── AppState ───────────────────────────────────
 
-/// What the server renders from. Decoupled from the kernel.
-/// The real pipeline hands a freshly computed `Analysis` in at startup.
-pub struct AppState {
+/// One loaded dispute and everything the views render from it.
+pub struct LoadedDispute {
+    pub id: String,
+    /// A warm, one-line human framing for the gallery card (sidecar copy,
+    /// independent of the kernel's internal text).
+    pub blurb: String,
     pub dispute: Dispute,
     pub analysis: Analysis,
-    /// Settlement acceptances: index → set of party ids who said "ok".
-    pub accepted: RwLock<Vec<std::collections::HashSet<String>>>,
+    pub receipts: Vec<Receipt>,
+    /// Per-settlement acceptances: index → set of party ids who said "ok".
+    pub accepted: RwLock<Vec<HashSet<String>>>,
+}
+
+impl LoadedDispute {
+    pub fn new(rec: DisputeRecord) -> Self {
+        let n = rec.analysis.settlements.len();
+        let blurb = blurb_for(&rec.id, &rec.dispute);
+        Self {
+            id: rec.id,
+            blurb,
+            dispute: rec.dispute,
+            analysis: rec.analysis,
+            receipts: rec.receipts,
+            accepted: RwLock::new(vec![HashSet::new(); n]),
+        }
+    }
+
+    fn party(&self, id: &str) -> Option<&Party> {
+        self.dispute.parties.iter().find(|p| p.id == id)
+    }
+}
+
+/// What the server renders from. Holds many disputes; decoupled from the kernel.
+pub struct AppState {
+    pub disputes: Vec<LoadedDispute>,
 }
 
 impl AppState {
-    pub fn new(dispute: Dispute, analysis: Analysis) -> Self {
-        let n = analysis.settlements.len();
-        Self {
-            dispute,
-            analysis,
-            accepted: RwLock::new(vec![std::collections::HashSet::new(); n]),
-        }
+    pub fn new(records: Vec<DisputeRecord>) -> Self {
+        let mut disputes: Vec<LoadedDispute> =
+            records.into_iter().map(LoadedDispute::new).collect();
+        // Stable, friendly order: the canonical roommate case first, then a-z.
+        disputes.sort_by(|a, b| {
+            let rank = |id: &str| if id == "roommate" { 0 } else { 1 };
+            rank(&a.id)
+                .cmp(&rank(&b.id))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Self { disputes }
+    }
+
+    pub fn get(&self, id: &str) -> Option<&LoadedDispute> {
+        self.disputes.iter().find(|d| d.id == id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.disputes.is_empty()
     }
 }
 
 type SharedState = Arc<AppState>;
 
+/// A warm, human one-liner for the gallery card. Keyed by scenario id so the
+/// copy reads well regardless of the kernel's internal (carpet-flavoured) text;
+/// falls back to a gentle generic framing for unknown scenarios.
+fn blurb_for(id: &str, dispute: &Dispute) -> String {
+    match id {
+        "roommate" => {
+            "Robin is moving out; Sam holds the $1,200 deposit. A carpet stain \
+             and some shared furniture stand between them — and they hate each \
+             other, but not that badly."
+        }
+        "freelance" => {
+            "A website handed off, an invoice unpaid. Was the work in scope, or \
+             half-finished? One contested milestone, and the project assets to \
+             divide."
+        }
+        "siblings" => {
+            "Two siblings sorting through what a parent left behind. One earlier \
+             gift, remembered differently — and a houseful of things that each \
+             mean more than money."
+        }
+        _ => return generic_blurb(dispute),
+    }
+    .to_string()
+}
+
+fn generic_blurb(dispute: &Dispute) -> String {
+    let names: Vec<&str> = dispute
+        .parties
+        .iter()
+        .map(|p| p.display_name.as_str())
+        .collect();
+    match names.as_slice() {
+        [a, b] => format!("{a} and {b} have something to work through — let's see the shape of it."),
+        _ => "A disagreement to work through, gently and in the open.".to_string(),
+    }
+}
+
 // ──────────────────────────────── router ─────────────────────────────────────
 
-/// Build the axum router. The static directory is resolved at call time using
-/// `CARGO_MANIFEST_DIR` (set at compile time) so the binary can locate
-/// `static/htmx.min.js` regardless of the working directory.
+/// Build the axum router over a fully loaded [`AppState`]. The `static/`
+/// directory is resolved at compile time via `CARGO_MANIFEST_DIR`, so the
+/// binary finds `static/htmx.min.js` regardless of the working directory.
 pub fn router(state: AppState) -> Router {
     let shared = Arc::new(state);
-
-    // Path to the `static/` directory, baked in at compile time.
     let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
     Router::new()
-        .route("/", get(landing))
-        .route("/party/:id", get(party_view))
-        .route("/operator", get(operator_view))
-        .route("/settlement/:idx/accept", post(settlement_accept))
+        .route("/", get(gallery))
+        .route("/dispute/:id", get(seat_picker))
+        .route("/party/:dispute_id/:party_id", get(party_view))
+        .route("/operator/:dispute_id", get(operator_view))
+        .route(
+            "/settlement/:dispute_id/:idx/accept",
+            post(settlement_accept),
+        )
+        .route(
+            "/settlement/:dispute_id/:idx/counter",
+            post(settlement_counter),
+        )
         .nest_service("/static", tower_http::services::ServeDir::new(static_dir))
         .with_state(shared)
 }
 
 // ─────────────────────────── shared page chrome ──────────────────────────────
 
-const CSS: &str = r#"
-:root {
-  --bg:      #faf9f7;
-  --surface: #ffffff;
-  --border:  #e8e4df;
-  --muted:   #8a8278;
-  --text:    #2c2925;
-  --accent:  #5b7fa6;
-  --green:   #4a7c59;
-  --amber:   #8c6d2f;
-  --danger:  #8c3a2f;
-  --radius:  10px;
-  --shadow:  0 1px 4px rgba(0,0,0,.07);
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.65;
-  font-size: 1rem;
-  padding: 2rem 1rem;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-.container { max-width: 760px; margin: 0 auto; }
-header { margin-bottom: 2.5rem; }
-header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -.01em; }
-header .subtitle { color: var(--muted); margin-top: .3rem; font-size: .95rem; }
-nav { margin-top: .8rem; font-size: .9rem; display: flex; gap: 1.2rem; }
-section { margin-bottom: 2rem; }
-section h2 {
-  font-size: 1rem; font-weight: 600; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .07em;
-  margin-bottom: .8rem;
-}
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.1rem 1.3rem;
-  box-shadow: var(--shadow);
-  margin-bottom: .8rem;
-}
-.card + .card { margin-top: .6rem; }
-.pill {
-  display: inline-block;
-  padding: .15rem .55rem;
-  border-radius: 99px;
-  font-size: .8rem;
-  font-weight: 500;
-  margin-left: .4rem;
-  vertical-align: middle;
-}
-.pill-green  { background: #dff0e5; color: var(--green); }
-.pill-amber  { background: #f5ecda; color: var(--amber); }
-.pill-red    { background: #f5e0de; color: var(--danger); }
-.pill-blue   { background: #dce8f5; color: var(--accent); }
-.pill-grey   { background: #eeebe7; color: var(--muted);  }
-.amount { font-size: 1.5rem; font-weight: 700; color: var(--text); }
-.amount-note { font-size: .85rem; color: var(--muted); margin-top: .2rem; }
-.two-doors {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
-  margin-top: 1.5rem;
-}
-.door {
-  display: block; padding: 1.4rem 1.2rem;
-  background: var(--surface); border: 1.5px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow);
-  text-align: center; transition: border-color .15s;
-}
-.door:hover { border-color: var(--accent); text-decoration: none; }
-.door .door-name { font-weight: 600; font-size: 1.05rem; }
-.door .door-hint { font-size: .85rem; color: var(--muted); margin-top: .25rem; }
-.operator-door {
-  display: block; padding: .8rem 1.2rem;
-  background: #f2f0ec; border: 1px solid var(--border);
-  border-radius: var(--radius); margin-top: .8rem;
-  font-size: .9rem; color: var(--muted); text-align: center;
-}
-.operator-door:hover { color: var(--text); }
-.hash { font-family: "SFMono-Regular", "Menlo", monospace; font-size: .78rem; color: var(--muted); word-break: break-all; }
-.mono { font-family: "SFMono-Regular", "Menlo", monospace; }
-.accept-btn {
-  margin-top: .8rem;
-  padding: .45rem 1rem;
-  background: var(--accent); color: #fff;
-  border: none; border-radius: 6px;
-  font-size: .88rem; cursor: pointer;
-  transition: background .12s;
-}
-.accept-btn:hover { background: #4a6e92; }
-.htmx-indicator { color: var(--muted); font-size: .82rem; margin-left: .5rem; }
-hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
-ul.plain { list-style: none; }
-ul.plain li { padding: .2rem 0; }
-ul.plain li::before { content: "· "; color: var(--muted); }
-.crux-box {
-  border: 1.5px solid var(--amber);
-  border-radius: var(--radius);
-  padding: 1rem 1.2rem;
-  background: #fffdf5;
-}
-.crux-box p { margin-top: .4rem; font-size: .92rem; }
-"#;
+const WORDMARK: &str = "Mediateor ☄";
 
 fn page(title: &str, body: Markup) -> Markup {
     html! {
@@ -179,232 +171,463 @@ fn page(title: &str, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (title) " — trusted mediator" }
+                title { (title) " — " (WORDMARK) }
                 style { (PreEscaped(CSS)) }
                 script src="/static/htmx.min.js" defer {}
             }
             body {
-                div .container {
+                div .page {
                     (body)
+                    footer .site-footer {
+                        span { (WORDMARK) }
+                        span .dot { "·" }
+                        span { "the prover's kindest move is knowing where to stop" }
+                    }
                 }
             }
         }
     }
 }
 
-fn nav_links(current: &str) -> Markup {
+/// The small wordmark that sits atop every interior page and links home.
+fn brandbar(crumb: Option<Markup>) -> Markup {
     html! {
-        nav {
-            @if current != "home" { a href="/" { "← Home" } }
-            @if current != "robin" { a href="/party/robin" { "Robin's view" } }
-            @if current != "sam"   { a href="/party/sam"   { "Sam's view" }   }
-            @if current != "op"    { a href="/operator"    { "Operator" }      }
+        div .brandbar {
+            a .wordmark href="/" { (WORDMARK) }
+            @if let Some(c) = crumb {
+                span .crumb-sep { "/" }
+                span .crumb { (c) }
+            }
         }
     }
 }
 
-// ─────────────────────────────── landing page ────────────────────────────────
+fn money(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let c = cents.unsigned_abs();
+    format!("{sign}${}.{:02}", c / 100, c % 100)
+}
 
-async fn landing(State(state): State<SharedState>) -> Markup {
-    let d = &state.dispute;
-    let party_links: Vec<Markup> = d.parties.iter().map(|p| {
-        html! {
-            a .door href=(format!("/party/{}", p.id)) {
-                div .door-name { (&p.display_name) }
-                div .door-hint { "See the situation from this perspective" }
+// ─────────────────────────────── the gallery ─────────────────────────────────
+
+async fn gallery(State(state): State<SharedState>) -> Markup {
+    page("Disputes", html! {
+        header .hero {
+            div .hero-mark { (WORDMARK) }
+            h1 .hero-title { "See the true shape of a disagreement." }
+            p .hero-lede {
+                "A trusted mediator. It doesn't judge — it clears away the parts "
+                "that were never really the fight, certifies the few facts that "
+                "must not be fudged, and hands back the one question that's "
+                "honestly yours to answer."
             }
         }
-    }).collect();
 
-    page(&d.title, html! {
-        header {
-            h1 { (&d.title) }
-            p .subtitle {
-                "This is a space for working through a disagreement with help. "
-                "The facts that can be verified have been, and the ones that cannot "
-                "are named honestly. You are not alone in this."
-            }
-            (nav_links("home"))
-        }
-
-        section {
-            h2 { "Choose a perspective" }
-            div .two-doors {
-                @for link in &party_links {
-                    (link)
+        @if state.is_empty() {
+            section {
+                div .card .empty {
+                    p { "No disputes are loaded yet." }
+                    p .muted {
+                        "Add a scenario under " span .mono { "scenarios/" }
+                        " and (optionally) its " span .mono { ".analysis.json" }
+                        " cache, then restart."
+                    }
                 }
             }
-        }
-
-        section {
-            a .operator-door href="/operator" {
-                "Operator / mediator view (all conflicts, ledger, receipts)"
+        } @else {
+            section .gallery {
+                @for d in &state.disputes {
+                    a .case-card href=(format!("/dispute/{}", d.id)) {
+                        div .case-eyebrow {
+                            @for (i, p) in d.dispute.parties.iter().enumerate() {
+                                @if i > 0 { span .vs { "vs" } }
+                                span .case-party { (party_first_name(&p.display_name)) }
+                            }
+                        }
+                        h2 .case-title { (&d.dispute.title) }
+                        p .case-blurb { (&d.blurb) }
+                        div .case-foot {
+                            @if d.analysis.crux.is_some() {
+                                span .chip .chip-amber { "1 open question" }
+                            }
+                            @if !d.analysis.dissolved.is_empty() {
+                                span .chip .chip-green { "a misunderstanding cleared" }
+                            }
+                            @if d.analysis.ledger_refund_cents.is_some() {
+                                span .chip .chip-blue { "ledger certified" }
+                            }
+                            span .case-go { "open →" }
+                        }
+                    }
+                }
             }
         }
     })
 }
 
-// ─────────────────────────────── party view ──────────────────────────────────
+/// "Robin (moving out)" → "Robin"; keeps a clean party chip.
+fn party_first_name(display: &str) -> String {
+    display
+        .split([' ', '(', ','])
+        .next()
+        .unwrap_or(display)
+        .trim()
+        .to_string()
+}
 
-async fn party_view(
+// ──────────────────────────── the seat picker ────────────────────────────────
+
+async fn seat_picker(
     Path(id): Path<String>,
     State(state): State<SharedState>,
 ) -> impl IntoResponse {
-    let d = &state.dispute;
-    let a = &state.analysis;
-
-    // Find the party — return 404 with a kind message if unknown.
-    let Some(party) = d.parties.iter().find(|p| p.id == id) else {
-        let body = page("Not found", html! {
-            header { h1 { "Party not found" } (nav_links("")) }
-            p { "We don't have a record of a party with that id. " a href="/" { "Go home." } }
-        });
-        return (StatusCode::NOT_FOUND, body).into_response();
+    let Some(d) = state.get(&id) else {
+        return not_found("We don't have a record of that dispute.");
     };
 
-    let accepted = state.accepted.read().await;
-    let title = format!("{}'s view", party.display_name);
+    let markup = page(&d.dispute.title, html! {
+        (brandbar(Some(html! { (&d.dispute.title) })))
 
-    let markup = page(&title, html! {
-        header {
-            h1 { (&party.display_name) }
-            p .subtitle { "Here is where things stand — as clearly and kindly as we can put them." }
-            (nav_links(&id))
+        header .interior-head {
+            h1 { "Choose your seat" }
+            p .lede {
+                "How you read this depends on where you sit. Pick a seat — you "
+                "can switch any time. Nothing here is a verdict; it's a way to "
+                "see the disagreement clearly."
+            }
         }
 
-        // ── Shared ground ────────────────────────────────────────────────
-        @if !a.shared_core.is_empty() {
-            section {
-                h2 { "What you both agree on" }
-                div .card {
-                    ul .plain {
-                        @for fact in &a.shared_core {
-                            li { (fact) }
-                        }
-                    }
+        section .seats {
+            @for p in &d.dispute.parties {
+                a .seat href=(format!("/party/{}/{}", d.id, p.id)) {
+                    span .seat-i { "I'm " (party_first_name(&p.display_name)) }
+                    span .seat-sub { (party_role(&p.display_name)) }
+                    span .seat-hint { "A gentle, guided walk-through of where things stand for you." }
                 }
             }
         }
 
-        // ── The one knot ─────────────────────────────────────────────────
-        @if let Some(crux) = &a.crux {
-            section {
-                h2 { "The question that everything turns on" }
-                div .crux-box {
-                    p { (crux) }
-                    p style="margin-top:.6rem;font-size:.85rem;color:#8a8278;" {
-                        "The mediator has confirmed this is the genuine crux. "
-                        "Everything else has been resolved or dissolved."
-                    }
-                }
-            }
-        }
-
-        // ── Dissolved misunderstandings ───────────────────────────────────
-        @if !a.dissolved.is_empty() {
-            section {
-                h2 { "Things that turned out not to be disagreements" }
-                div .card {
-                    ul .plain {
-                        @for item in &a.dissolved {
-                            li { (item) }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Ledger ───────────────────────────────────────────────────────
         section {
-            h2 { "The money" }
-            @if let Some(refund_cents) = a.ledger_refund_cents {
-                div .card {
-                    div .amount { (format!("${:.2}", refund_cents as f64 / 100.0)) }
-                    div .amount-note { "certified minimum refund (ledger proven)" }
-                }
-            }
-            @if !a.ledger_findings.is_empty() {
-                div .card {
-                    ul .plain {
-                        @for finding in &a.ledger_findings {
-                            li { (finding) }
-                        }
-                    }
-                }
-            }
-            @if a.ledger_refund_cents.is_none() && a.ledger_findings.is_empty() {
-                div .card {
-                    p style="color:#8a8278;" { "Ledger analysis pending." }
-                }
-            }
-        }
-
-        // ── Settlement options ─────────────────────────────────────────
-        @if !a.settlements.is_empty() {
-            section {
-                h2 { "Fair settlement options" }
-                p style="font-size:.88rem;color:#8a8278;margin-bottom:1rem;" {
-                    "Each option below has been certified for fairness. "
-                    "You can mark one as acceptable — the other party will see your answer."
-                }
-                @for (idx, s) in a.settlements.iter().enumerate() {
-                    (settlement_card(idx, s, &accepted[idx], &id))
+            a .seat .seat-operator href=(format!("/operator/{}", d.id)) {
+                span .seat-i { "Watch as the mediator" }
+                span .seat-sub { "operator · the full picture" }
+                span .seat-hint {
+                    "The cockpit: certified ledger findings, the crux verdict, the "
+                    "settlement table, and the hash-chained receipt ledger."
                 }
             }
         }
     });
-
     (StatusCode::OK, markup).into_response()
 }
 
+/// "Robin (moving out)" → "moving out"; the parenthetical, lightly cased.
+fn party_role(display: &str) -> String {
+    if let (Some(a), Some(b)) = (display.find('('), display.find(')')) {
+        if b > a + 1 {
+            return display[a + 1..b].to_string();
+        }
+    }
+    "in this dispute".to_string()
+}
+
+// ─────────────────────────────── party view ──────────────────────────────────
+//
+// A gentle, progressively-revealed scrollytelling walk. Sections fade/slide in
+// as they enter the viewport (pure CSS + a touch of inline JS; htmx for the
+// settlement interactions). Never a formula, never the word "wrong".
+
+async fn party_view(
+    Path((dispute_id, party_id)): Path<(String, String)>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&dispute_id) else {
+        return not_found("We don't have a record of that dispute.");
+    };
+    let Some(party) = d.party(&party_id) else {
+        return not_found("We don't have a record of a party with that id.");
+    };
+    let a = &d.analysis;
+    let accepted = d.accepted.read().await;
+    let you = party_first_name(&party.display_name);
+    let other = d
+        .dispute
+        .parties
+        .iter()
+        .find(|p| p.id != party_id)
+        .map(|p| party_first_name(&p.display_name))
+        .unwrap_or_else(|| "the other party".to_string());
+
+    let markup = page(&format!("{you}'s view"), html! {
+        (brandbar(Some(html! { a href=(format!("/dispute/{}", d.id)) { (&d.dispute.title) } })))
+
+        header .interior-head .party-head {
+            p .eyebrow { "For " (you) }
+            h1 { "Let's walk through this, gently." }
+            p .lede {
+                "Take it one step at a time. We'll start with what you already "
+                "agree on — it's usually more than it feels like — and end with a "
+                "few fair ways forward."
+            }
+            p .scroll-cue { "scroll ↓" }
+        }
+
+        // (1) What you already agree on.
+        @if !a.shared_core.is_empty() {
+            section .reveal .step {
+                span .step-n { "1" }
+                h2 { "What you already agree on" }
+                p .step-lede { "The ground you share. None of this is in question." }
+                div .card .soft {
+                    ul .plain {
+                        @for fact in &a.shared_core { li { (humanize(fact)) } }
+                    }
+                }
+            }
+        }
+
+        // (2) Things that were just different words.
+        @if !a.dissolved.is_empty() {
+            section .reveal .step {
+                span .step-n { "2" }
+                h2 { "Things that turned out not to be disagreements" }
+                p .step-lede {
+                    "These looked like fights but were just different words, or a "
+                    "number remembered roughly. Cleared, kindly — no fault in it."
+                }
+                @for item in &a.dissolved {
+                    div .card .dissolved {
+                        span .dissolved-mark { "✓" }
+                        span { (humanize(item)) }
+                    }
+                }
+            }
+        }
+
+        // (3) The one open question — the crux, phrased kindly.
+        @if let Some(crux) = &a.crux {
+            section .reveal .step {
+                span .step-n { "3" }
+                h2 { "The one question that's really yours" }
+                p .step-lede {
+                    "Everything else has been settled or set aside. This is the "
+                    "single thing left — and it's not ours to decide. It's a "
+                    "judgement only the two of you can make."
+                }
+                div .crux-box {
+                    p .crux-q { (crux_question(d, crux)) }
+                    p .crux-note {
+                        "We've confirmed this is the genuine crux: answer it, and "
+                        "the numbers below follow on their own."
+                    }
+                }
+            }
+        }
+
+        // (4) What the numbers show — certified, with the refund range.
+        section .reveal .step {
+            span .step-n { "4" }
+            h2 { "What the numbers show" }
+            p .step-lede {
+                "Checked carefully, so no one has to take anyone's word for it."
+            }
+            @if let Some(refund) = a.ledger_refund_cents {
+                div .card .figure {
+                    div .figure-amount { (money(refund)) }
+                    div .figure-note {
+                        "the amount that's settled either way — the rest depends on "
+                        "the one open question above"
+                    }
+                }
+            }
+            @if !a.ledger_findings.is_empty() {
+                div .card .soft {
+                    ul .plain {
+                        @for f in &a.ledger_findings { li { (humanize(f)) } }
+                    }
+                }
+            }
+            @if a.ledger_refund_cents.is_none() && a.ledger_findings.is_empty() {
+                div .card .soft { p .muted { "The money side is still being worked out." } }
+            }
+        }
+
+        // (5) Fair ways forward — settlement cards.
+        @if !a.settlements.is_empty() {
+            section .reveal .step {
+                span .step-n { "5" }
+                h2 { "A few fair ways forward" }
+                p .step-lede {
+                    "Each option splits the shared things so neither of you would "
+                    "rather have the other's share. Mark any that you'd be okay "
+                    "with — " (other) " will see your answer, never your reasons."
+                }
+                @for (idx, s) in a.settlements.iter().enumerate() {
+                    (settlement_card(&d.id, idx, s, &accepted[idx], &party_id, &you))
+                }
+            }
+        }
+
+        section .reveal .closing {
+            p {
+                "That's the whole shape of it. Not a winner and a loser — just the "
+                "smallest world that holds you both, and the one honest question in "
+                "the middle of it."
+            }
+            a .ghost-link href=(format!("/dispute/{}", d.id)) { "← back to seats" }
+        }
+
+        (reveal_script())
+    });
+    (StatusCode::OK, markup).into_response()
+}
+
+/// A small bit of JS that adds `.in` to `.reveal` sections as they scroll into
+/// view (progressive reveal). Degrades gracefully: if JS is off, a CSS fallback
+/// shows everything.
+fn reveal_script() -> Markup {
+    html! {
+        script {
+            (PreEscaped(r#"
+            (function () {
+              var els = document.querySelectorAll('.reveal');
+              if (!('IntersectionObserver' in window)) {
+                els.forEach(function (e) { e.classList.add('in'); });
+                return;
+              }
+              var io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (en) {
+                  if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+                });
+              }, { threshold: 0.12 });
+              els.forEach(function (e) { io.observe(e); });
+            })();
+            "#))
+        }
+    }
+}
+
+/// Phrase the crux as a kind question, derived from the *dispute's own
+/// structure* rather than the kernel's crux prose.
+///
+/// The kernel renders the crux in a fixed (carpet-flavoured) idiom that is only
+/// right for the roommate case. But every dispute carries a clean, faithful
+/// source of the contested predicate: the stipulated bridge
+/// `Iff(consequence, crux_predicate)`, whose predicate has a plain-English
+/// `gloss` in some party's signature. We build the question from that.
+///
+/// Order of preference:
+///   1. the crux predicate's signature gloss → "Is it true that {gloss}?"
+///   2. a "Whether …" genuine-conflict description, if present
+///   3. the kernel's crux sentence (last resort)
+fn crux_question(d: &LoadedDispute, kernel_crux: &str) -> String {
+    if let Some(gloss) = crux_gloss(&d.dispute) {
+        let g = gloss.trim().trim_end_matches('.');
+        return format!("Is it true that {g}?");
+    }
+    if let Some(c) = d.analysis.genuine_conflicts.first() {
+        let desc = c.description.trim();
+        if let Some(rest) = desc.strip_prefix("Whether ") {
+            let core = rest.split(" — ").next().unwrap_or(rest).trim();
+            return format!("Is it true that {core}?");
+        }
+        if !desc.is_empty() {
+            return desc.split(" — ").next().unwrap_or(desc).trim().to_string();
+        }
+    }
+    kernel_crux.to_string()
+}
+
+/// Find the gloss of the crux predicate. The crux is the right-hand atom of a
+/// stipulated `Iff(consequence, crux)`; look its symbol up in the parties'
+/// signatures and return that symbol's human gloss.
+fn crux_gloss(dispute: &Dispute) -> Option<String> {
+    let crux_sym = dispute.stipulated.iter().find_map(crux_symbol)?;
+    dispute
+        .parties
+        .iter()
+        .flat_map(|p| &p.signature)
+        .find(|s| s.name == crux_sym && !s.gloss.trim().is_empty())
+        .map(|s| s.gloss.clone())
+}
+
+/// From a stipulated `Iff(_, Atom(App(sym, [])))`, pull `sym` — the predicate
+/// the whole obligation reduces to.
+fn crux_symbol(f: &Formula) -> Option<String> {
+    let Formula::Iff(_, rhs) = f else { return None };
+    match rhs.as_ref() {
+        Formula::Atom(Term::App(sym, args)) if args.is_empty() => Some(sym.clone()),
+        _ => None,
+    }
+}
+
 fn settlement_card(
+    dispute_id: &str,
     idx: usize,
     s: &Settlement,
-    accepted_by: &std::collections::HashSet<String>,
+    accepted_by: &HashSet<String>,
     viewer: &str,
+    viewer_name: &str,
 ) -> Markup {
-    let already_accepted = accepted_by.contains(viewer);
-    let all_accepted = accepted_by.len() >= 2;
+    let already = accepted_by.contains(viewer);
+    let all = accepted_by.len() >= 2;
 
     html! {
-        div .card id=(format!("settlement-{}", idx)) {
-            div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;" {
-                strong { (&s.label) }
-                @if s.envy_free    { span .pill.pill-green  { "envy-free" }    }
-                @if s.equitable    { span .pill.pill-green  { "equitable" }    }
-                @if s.pareto_optimal { span .pill.pill-blue { "Pareto" }       }
+        div .card .settlement id=(format!("settlement-{idx}")) {
+            div .settlement-head {
+                strong { "Option " (idx + 1) }
+                @if s.envy_free { span .chip .chip-green { "envy-free" } }
+                @if s.equitable { span .chip .chip-green { "equitable" } }
+                @if s.pareto_optimal { span .chip .chip-blue { "no waste" } }
             }
-            p style="margin-top:.5rem;font-size:.9rem;" { (&s.explanation) }
+            p .settlement-text { (humanize_settlement(&s.explanation)) }
 
-            @if !s.allocations.is_empty() {
-                div style="margin-top:.6rem;font-size:.85rem;color:#5c5752;" {
+            @if !s.allocations.is_empty() || !s.splits.is_empty() {
+                ul .alloc {
                     @for (item_id, party_id) in &s.allocations {
-                        span style="margin-right:.8rem;" {
-                            strong { (item_id) } " → " (party_id)
-                        }
+                        li { span .alloc-item { (prettify_id(item_id)) } span .alloc-arrow { "→" } span .alloc-who { (prettify_id(party_id)) } }
+                    }
+                    @for (item_id, frac) in &s.splits {
+                        li { span .alloc-item { (prettify_id(item_id)) } span .alloc-arrow { "→" } span .alloc-who { "shared (" (format!("{:.0}%", frac * 100.0)) " / " (format!("{:.0}%", (1.0 - frac) * 100.0)) ")" } }
                     }
                 }
             }
 
-            @if !already_accepted && !all_accepted {
-                form {
-                    button
-                        .accept-btn
-                        hx-post=(format!("/settlement/{}/accept", idx))
-                        hx-vals=(format!("{{\"party\":\"{}\"}}", viewer))
-                        hx-target=(format!("#settlement-{}", idx))
-                        hx-swap="outerHTML"
-                        { "Mark as acceptable" }
-                    span .htmx-indicator { "..." }
-                }
-            } @else if all_accepted {
-                p style="margin-top:.7rem;color:#4a7c59;font-weight:600;" {
-                    "✓ Both parties have accepted this option."
-                }
-            } @else {
-                p style="margin-top:.7rem;color:#5b7fa6;" {
-                    "Marked as acceptable — waiting on the other party."
-                }
+            (settlement_actions(dispute_id, idx, viewer, viewer_name, already, all))
+        }
+    }
+}
+
+/// The action row of a settlement card — the only part that changes after an
+/// htmx round-trip, but we re-emit the whole card so the swap is self-contained.
+fn settlement_actions(
+    dispute_id: &str,
+    idx: usize,
+    viewer: &str,
+    viewer_name: &str,
+    already: bool,
+    all: bool,
+) -> Markup {
+    html! {
+        @if all {
+            p .settle-done { "✓ You both find this acceptable." }
+        } @else if already {
+            p .settle-waiting { "Marked acceptable — waiting on the other party ✓" }
+        } @else {
+            div .settle-actions {
+                button .btn .btn-accept
+                    hx-post=(format!("/settlement/{dispute_id}/{idx}/accept"))
+                    hx-vals=(format!("{{\"party\":\"{viewer}\",\"name\":\"{viewer_name}\"}}"))
+                    hx-target=(format!("#settlement-{idx}"))
+                    hx-swap="outerHTML"
+                    { "Mark acceptable" }
+                button .btn .btn-counter
+                    hx-post=(format!("/settlement/{dispute_id}/{idx}/counter"))
+                    hx-vals=(format!("{{\"name\":\"{viewer_name}\"}}"))
+                    hx-target=(format!("#settlement-{idx}"))
+                    hx-swap="outerHTML"
+                    { "I'd like to counter" }
+                span .htmx-indicator { "…" }
             }
         }
     }
@@ -412,56 +635,56 @@ fn settlement_card(
 
 // ────────────────────────────── operator view ────────────────────────────────
 
-async fn operator_view(State(state): State<SharedState>) -> Markup {
-    let d = &state.dispute;
-    let a = &state.analysis;
+async fn operator_view(
+    Path(dispute_id): Path<String>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&dispute_id) else {
+        return not_found("We don't have a record of that dispute.");
+    };
+    let a = &d.analysis;
+    let disp = &d.dispute;
 
-    page("Operator cockpit", html! {
-        header {
+    let markup = page("Operator cockpit", html! {
+        (brandbar(Some(html! { a href=(format!("/dispute/{}", d.id)) { (&disp.title) } " · operator" })))
+
+        header .interior-head {
             h1 { "Operator cockpit" }
-            p .subtitle { "All conflicts, ledger findings, crux status, and receipt hashes." }
-            (nav_links("op"))
-        }
-
-        // ── Crux status ─────────────────────────────────────────────────
-        section {
-            h2 { "Crux" }
-            @match &a.crux {
-                Some(crux) => {
-                    div .card {
-                        span .pill.pill-amber { "ISOLATED" }
-                        " "
-                        (crux)
-                    }
-                }
-                None => {
-                    div .card {
-                        span .pill.pill-grey { "UNKNOWN" }
-                        " Crux not yet isolated."
-                    }
-                }
+            p .lede {
+                "The full picture: genuine conflicts, the crux verdict, certified "
+                "ledger findings, the settlement table, and the receipt chain. "
+                "Everything here is provenance you can point at."
             }
         }
 
-        // ── Genuine conflicts ───────────────────────────────────────────
+        // ── Crux ─────────────────────────────────────────────────────────
         section {
-            h2 { (format!("Conflicts ({})", a.genuine_conflicts.len())) }
+            h2 .op-h { "Crux" }
+            @match &a.crux {
+                Some(crux) => div .card {
+                    div .op-row { span .pill .pill-amber { "ISOLATED" } span .pill .pill-grey { "verdict: Unknown (by design)" } }
+                    p .op-crux { (crux) }
+                    p .muted .small { "The kernel proves the whole question reduces here, then refuses to decide it — that refusal is the honest answer." }
+                },
+                None => div .card { span .pill .pill-grey { "NOT ISOLATED" } " No single crux on record." },
+            }
+        }
+
+        // ── Genuine conflicts ────────────────────────────────────────────
+        section {
+            h2 .op-h { "Genuine conflicts (" (a.genuine_conflicts.len()) ")" }
             @if a.genuine_conflicts.is_empty() {
-                div .card { p style="color:#8a8278;" { "No conflicts on record." } }
+                div .card { p .muted { "No genuine conflicts on record." } }
             } @else {
                 @for c in &a.genuine_conflicts {
                     div .card {
-                        div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;" {
-                            strong { (&c.description) }
-                            @for pid in &c.parties {
-                                span .pill.pill-blue { (pid) }
-                            }
-                        }
-                        @if !c.claim_ids.is_empty() {
-                            div style="margin-top:.4rem;font-size:.82rem;color:#8a8278;" {
-                                "Claims: "
-                                @for cid in &c.claim_ids {
-                                    span .mono style="margin-right:.4rem;" { (cid) }
+                        div .op-row { strong { (&c.description) } }
+                        div .op-meta {
+                            @for pid in &c.parties { span .pill .pill-blue { (pid) } }
+                            @if !c.claim_ids.is_empty() {
+                                span .op-claims {
+                                    "claims: "
+                                    @for cid in &c.claim_ids { span .mono { (cid) } " " }
                                 }
                             }
                         }
@@ -470,353 +693,289 @@ async fn operator_view(State(state): State<SharedState>) -> Markup {
             }
         }
 
-        // ── Ledger findings ─────────────────────────────────────────────
+        // ── Certified ledger findings ────────────────────────────────────
         section {
-            h2 { "Ledger findings" }
+            h2 .op-h { "Certified ledger" }
             div .card {
                 @if a.ledger_findings.is_empty() {
-                    p style="color:#8a8278;" { "No findings." }
+                    p .muted { "No findings." }
                 } @else {
-                    ul .plain {
-                        @for f in &a.ledger_findings {
-                            li { (f) }
-                        }
-                    }
+                    ul .plain { @for f in &a.ledger_findings { li { (f) } } }
                 }
                 @if let Some(r) = a.ledger_refund_cents {
                     hr .divider;
-                    p {
-                        span .pill.pill-green { "PROVED" }
-                        " Minimum refund: "
-                        strong { (format!("${:.2}", r as f64 / 100.0)) }
-                    }
+                    p { span .pill .pill-green { "PROVED" } " Settled-either-way refund: " strong { (money(r)) } }
                 }
             }
         }
 
-        // ── Dispute claims ──────────────────────────────────────────────
-        section {
-            h2 { "Claims" }
-            @for claim in &d.claims {
-                div .card {
-                    div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;" {
-                        span .mono { (&claim.id) }
-                        span .pill.pill-blue { (&claim.party) }
-                        @if claim.defeasible { span .pill.pill-amber { "defeasible" } }
-                        @if !claim.active  { span .pill.pill-grey  { "inactive" } }
-                    }
-                    p style="margin-top:.4rem;" { (&claim.nl) }
-                    p style="margin-top:.2rem;font-size:.82rem;color:#8a8278;" {
-                        em { (&claim.english_render) }
-                    }
-                }
-            }
-        }
-
-        // ── Dissolved items ─────────────────────────────────────────────
-        @if !a.dissolved.is_empty() {
-            section {
-                h2 { "Dissolved (vocabulary, not substance)" }
-                div .card {
-                    ul .plain {
-                        @for item in &a.dissolved {
-                            li { (item) }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Ledger items ────────────────────────────────────────────────
-        section {
-            h2 { "Ledger" }
-            div .card {
-                p {
-                    "Deposit: "
-                    strong { (format!("${:.2}", d.ledger.deposit_cents as f64 / 100.0)) }
-                }
-                hr .divider;
-                @for item in &d.ledger.items {
-                    div style="display:flex;justify-content:space-between;padding:.25rem 0;border-bottom:1px solid #e8e4df;" {
-                        span {
-                            (&item.label)
-                            @if item.disputed { span .pill.pill-amber { "disputed" } }
-                        }
-                        span .mono { (format!("${:.2}", item.amount_cents as f64 / 100.0)) }
-                    }
-                }
-            }
-        }
-
-        // ── Settlements ─────────────────────────────────────────────────
+        // ── Settlement table ─────────────────────────────────────────────
         @if !a.settlements.is_empty() {
             section {
-                h2 { "Settlement options" }
-                @for s in &a.settlements {
-                    div .card {
-                        div style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;" {
-                            strong { (&s.label) }
-                            @if s.envy_free    { span .pill.pill-green { "envy-free" }  }
-                            @if s.equitable    { span .pill.pill-green { "equitable" }  }
-                            @if s.pareto_optimal { span .pill.pill-blue { "Pareto" }    }
+                h2 .op-h { "Settlement options" }
+                div .card .tablewrap {
+                    table .op-table {
+                        thead {
+                            tr {
+                                th { "option" }
+                                @for p in &disp.parties { th .num { (party_first_name(&p.display_name)) " pts" } }
+                                th { "envy-free" } th { "equitable" } th { "Pareto" }
+                            }
                         }
-                        p style="margin-top:.4rem;font-size:.9rem;" { (&s.explanation) }
-                        @for (pid, pts) in &s.party_points {
-                            span style="font-size:.82rem;margin-right:.8rem;color:#5c5752;" {
-                                (pid) ": " (format!("{:.1} pts", pts))
+                        tbody {
+                            @for s in &a.settlements {
+                                tr {
+                                    td { (&s.label) }
+                                    @for p in &disp.parties {
+                                        td .num {
+                                            @let pts = s.party_points.iter().find(|(id, _)| id == &p.id).map(|(_, v)| *v);
+                                            @match pts { Some(v) => (format!("{v:.1}")), None => "—" }
+                                        }
+                                    }
+                                    td { (yesno(s.envy_free)) }
+                                    td { (yesno(s.equitable)) }
+                                    td { (yesno(s.pareto_optimal)) }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    })
+
+        // ── Claims ───────────────────────────────────────────────────────
+        section {
+            h2 .op-h { "Claims" }
+            @for claim in &disp.claims {
+                div .card {
+                    div .op-meta {
+                        span .mono { (&claim.id) }
+                        span .pill .pill-blue { (&claim.party) }
+                        @if claim.defeasible { span .pill .pill-amber { "defeasible" } }
+                        @if !claim.active { span .pill .pill-grey { "inactive" } }
+                        span .muted .small { "weight " (claim.weight) }
+                    }
+                    p .op-claim-nl { (&claim.nl) }
+                    p .muted .small { em { (&claim.english_render) } }
+                }
+            }
+        }
+
+        // ── Ledger ───────────────────────────────────────────────────────
+        section {
+            h2 .op-h { "Ledger" }
+            div .card {
+                p { "Deposit held: " strong { (money(disp.ledger.deposit_cents)) } }
+                hr .divider;
+                @for item in &disp.ledger.items {
+                    div .ledger-line {
+                        span { (&item.label) @if item.disputed { span .pill .pill-amber { "disputed" } } }
+                        span .mono { (money(item.amount_cents)) }
+                    }
+                }
+            }
+        }
+
+        // ── Receipt chain ────────────────────────────────────────────────
+        section {
+            h2 .op-h { "Receipt ledger (" (d.receipts.len()) " links, hash-chained)" }
+            div .card .tablewrap {
+                table .op-table .receipts {
+                    thead { tr { th { "seq" } th { "op" } th { "hash" } th { "verdict" } } }
+                    tbody {
+                        @for r in &d.receipts {
+                            tr {
+                                td .num { (r.seq) }
+                                td .mono { (&r.op) }
+                                td .mono .hash { (short_hash(&r.hash)) }
+                                td { (verdict_pill(&r.verdict)) }
+                            }
+                        }
+                    }
+                }
+                p .muted .small .chain-note { "Each link's hash folds in the one before it; tamper with any row and the chain breaks." }
+            }
+        }
+    });
+    (StatusCode::OK, markup).into_response()
 }
 
-// ──────────────────────── htmx: settlement accept ────────────────────────────
-
-/// Receives a party's acceptance of a settlement option.
-/// Returns an HTML fragment that replaces the card in place.
-async fn settlement_accept(
-    Path(idx): Path<usize>,
-    State(state): State<SharedState>,
-    axum::Form(form): axum::Form<AcceptForm>,
-) -> impl IntoResponse {
-    // Bounds check.
-    if idx >= state.analysis.settlements.len() {
-        return (StatusCode::BAD_REQUEST, html! { p { "Invalid settlement index." } })
-            .into_response();
+fn yesno(b: bool) -> Markup {
+    if b {
+        html! { span .yes { "✓" } }
+    } else {
+        html! { span .no { "—" } }
     }
-
-    // Record the acceptance.
-    {
-        let mut accepted = state.accepted.write().await;
-        accepted[idx].insert(form.party.clone());
-    }
-
-    let accepted = state.accepted.read().await;
-    let s = &state.analysis.settlements[idx];
-    let card = settlement_card(idx, s, &accepted[idx], &form.party);
-    (StatusCode::OK, card).into_response()
 }
+
+fn short_hash(h: &str) -> String {
+    if h.len() >= 12 {
+        format!("{}…", &h[..12])
+    } else if h.is_empty() {
+        "—".to_string()
+    } else {
+        h.to_string()
+    }
+}
+
+fn verdict_pill(v: &Option<mediator_types::Verdict>) -> Markup {
+    use mediator_types::Verdict::*;
+    match v {
+        Some(Proved) => html! { span .pill .pill-green { "Proved" } },
+        Some(Refuted) => html! { span .pill .pill-red { "Refuted" } },
+        Some(Unknown) => html! { span .pill .pill-grey { "Unknown" } },
+        Some(Error(e)) => html! { span .pill .pill-red { "Error" } span .muted .small { " " (e) } },
+        None => html! { span .muted { "—" } },
+    }
+}
+
+// ──────────────────────── htmx: settlement actions ────────────────────────────
 
 #[derive(serde::Deserialize)]
 struct AcceptForm {
     party: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn settlement_accept(
+    Path((dispute_id, idx)): Path<(String, usize)>,
+    State(state): State<SharedState>,
+    axum::Form(form): axum::Form<AcceptForm>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&dispute_id) else {
+        return (StatusCode::NOT_FOUND, html! { p { "Unknown dispute." } }).into_response();
+    };
+    if idx >= d.analysis.settlements.len() {
+        return (StatusCode::BAD_REQUEST, html! { p { "Invalid settlement index." } })
+            .into_response();
+    }
+    {
+        let mut accepted = d.accepted.write().await;
+        accepted[idx].insert(form.party.clone());
+    }
+    let accepted = d.accepted.read().await;
+    let name = if form.name.is_empty() { &form.party } else { &form.name };
+    let card = settlement_card(
+        &dispute_id,
+        idx,
+        &d.analysis.settlements[idx],
+        &accepted[idx],
+        &form.party,
+        name,
+    );
+    (StatusCode::OK, card).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct CounterForm {
+    #[serde(default)]
+    name: String,
+}
+
+/// A "counter" affordance: the party signals they'd like to propose a change.
+/// We don't (yet) capture a structured counter — we acknowledge it warmly and
+/// note the mediator will reach out. Returns a self-contained card fragment.
+async fn settlement_counter(
+    Path((dispute_id, idx)): Path<(String, usize)>,
+    State(state): State<SharedState>,
+    axum::Form(form): axum::Form<CounterForm>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&dispute_id) else {
+        return (StatusCode::NOT_FOUND, html! { p { "Unknown dispute." } }).into_response();
+    };
+    if idx >= d.analysis.settlements.len() {
+        return (StatusCode::BAD_REQUEST, html! { p { "Invalid settlement index." } })
+            .into_response();
+    }
+    let name = if form.name.trim().is_empty() { "You" } else { form.name.trim() };
+    let fragment = html! {
+        div .card .settlement id=(format!("settlement-{idx}")) {
+            div .settlement-head { strong { "Option " (idx + 1) } span .chip .chip-amber { "counter requested" } }
+            p .settle-counter {
+                (name) " would like to talk this one through before agreeing. That's "
+                "completely fine — the mediator will help you shape a counter-offer, "
+                "and the other party will be told a conversation is open, not that "
+                "anything was refused."
+            }
+        }
+    };
+    (StatusCode::OK, fragment).into_response()
+}
+
+// ───────────────────────────── small helpers ─────────────────────────────────
+
+fn not_found(msg: &str) -> axum::response::Response {
+    let body = page("Not found", html! {
+        (brandbar(None))
+        header .interior-head {
+            h1 { "Nothing here" }
+            p .lede { (msg) " " a href="/" { "Back to the gallery." } }
+        }
+    });
+    (StatusCode::NOT_FOUND, body).into_response()
+}
+
+/// "couch" → "Couch"; "standing_desk" → "Standing desk".
+fn prettify_id(id: &str) -> String {
+    let spaced = id.replace(['_', '-'], " ");
+    let mut chars = spaced.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => spaced,
+    }
+}
+
+/// Light-touch softening of kernel prose for a party's eyes.
+///
+/// The kernel is already kind, but its English renderer is phrased for the
+/// roommate case: it talks about "the stain", "ordinary wear", "damage", and
+/// "deductions" even in a freelance or estate dispute. We rewrite those fixed
+/// idioms into dispute-neutral language so the party view reads naturally for
+/// *every* scenario. (The operator cockpit keeps the kernel's verbatim text.)
+fn humanize(s: &str) -> String {
+    let mut t = s.replace("You both stipulate: ", "You both agree: ");
+    // The two-world refund line: "$X back if the stain is ordinary wear; $Y
+    // back if it counts as damage." → neutral "gentler / stricter reading".
+    t = t.replace(
+        "back if the stain is ordinary wear",
+        "settled in the gentler reading of the open question",
+    );
+    t = t.replace(
+        "back if it counts as damage",
+        "settled in the stricter reading",
+    );
+    // Over-claim / itemization wording.
+    t = t.replace(" in deductions is not what the itemization supports", " doesn't match the itemized figures");
+    t = t.replace("the itemized deductions total", "the itemized figures come to");
+    t = t.replace("gap on the deductions is", "gap is");
+    t
+}
+
+/// The Adjusted Winner explanation is precise but operator-flavoured (point
+/// totals, "Pareto-optimal"). For a party, lead with the human sentence and
+/// drop the bare arithmetic dump; the allocation list already shows the split.
+fn humanize_settlement(explanation: &str) -> String {
+    // Keep only the first human-readable line if the kernel dumped a multi-line
+    // mechanism trace; the structured allocation list carries the specifics.
+    let first = explanation
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("Adjusted Winner"))
+        .unwrap_or(explanation.trim());
+    if first.starts_with("The shared")
+        || first.contains("→")
+        || first.starts_with("Final point")
+    {
+        // It's mechanism detail, not a sentence — give a calm generic line.
+        return "A fair split of the shared things, with the deposit settled \
+                accordingly. Neither of you would rather have the other's share."
+            .to_string();
+    }
+    first.to_string()
 }
 
 // ─────────────────────────────────── tests ───────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use mediator_types::{
-        Analysis, Claim, Conflict, ContestedItem, Dispute, Formula, Ledger,
-        LedgerItem, Party, Settlement, Term, Valuation,
-    };
-    use tower::ServiceExt; // for `.oneshot()`
-
-    /// Build a minimal Dispute + Analysis that exercises all the routes.
-    fn fixture() -> AppState {
-        let dispute = Dispute {
-            title: "Test Roommate Dispute".to_string(),
-            parties: vec![
-                Party {
-                    id: "robin".to_string(),
-                    display_name: "Robin (moving out)".to_string(),
-                    signature: vec![],
-                },
-                Party {
-                    id: "sam".to_string(),
-                    display_name: "Sam (staying)".to_string(),
-                    signature: vec![],
-                },
-            ],
-            claims: vec![
-                Claim {
-                    id: "r1".to_string(),
-                    party: "robin".to_string(),
-                    nl: "The carpet stain was ordinary wear and tear.".to_string(),
-                    formula: Formula::Not(Box::new(Formula::Atom(Term::App(
-                        "stain_is_damage".to_string(),
-                        vec![],
-                    )))),
-                    english_render: "It is not the case that the stain is damage.".to_string(),
-                    weight: 7,
-                    defeasible: false,
-                    active: true,
-                },
-            ],
-            stipulated: vec![],
-            ledger: Ledger {
-                deposit_cents: 120_000,
-                items: vec![
-                    LedgerItem {
-                        id: "cleaning".to_string(),
-                        label: "Professional cleaning".to_string(),
-                        amount_cents: 15_000,
-                        asserted_by: "sam".to_string(),
-                        disputed: false,
-                    },
-                ],
-            },
-            contested_items: vec![
-                ContestedItem {
-                    id: "couch".to_string(),
-                    label: "The shared couch".to_string(),
-                    divisible: false,
-                },
-            ],
-            valuations: vec![
-                Valuation { party: "robin".to_string(), item: "couch".to_string(), points: 60 },
-                Valuation { party: "sam".to_string(),   item: "couch".to_string(), points: 40 },
-            ],
-        };
-
-        let analysis = Analysis {
-            shared_core: vec!["Both parties agree Robin lived there.".to_string()],
-            genuine_conflicts: vec![Conflict {
-                description: "Is the stain damage?".to_string(),
-                parties: vec!["robin".to_string(), "sam".to_string()],
-                claim_ids: vec!["r1".to_string(), "s1".to_string()],
-            }],
-            dissolved: vec!["Sam's $500 verbal claim dissolved by itemized ledger.".to_string()],
-            ledger_refund_cents: Some(105_000),
-            ledger_findings: vec!["Claimed total $500 refuted; itemized = $450.".to_string()],
-            crux: Some("stain_is_damage — the whole dispute reduces to this.".to_string()),
-            settlements: vec![Settlement {
-                label: "Wear-and-tear settlement".to_string(),
-                allocations: vec![("couch".to_string(), "robin".to_string())],
-                splits: vec![],
-                party_points: vec![
-                    ("robin".to_string(), 60.0),
-                    ("sam".to_string(), 40.0),
-                ],
-                envy_free: true,
-                equitable: true,
-                pareto_optimal: true,
-                explanation: "Robin keeps the couch; deposit refunded in full minus cleaning."
-                    .to_string(),
-            }],
-        };
-
-        AppState::new(dispute, analysis)
-    }
-
-    #[tokio::test]
-    async fn test_landing_returns_200_with_title() {
-        let app = router(fixture());
-        let req = Request::builder()
-            .uri("/")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = std::str::from_utf8(&body).unwrap();
-        assert!(html.contains("Test Roommate Dispute"), "title missing from landing");
-        assert!(html.contains("Robin"), "Robin link missing");
-        assert!(html.contains("Sam"), "Sam link missing");
-        assert!(html.contains("Operator"), "Operator link missing");
-    }
-
-    #[tokio::test]
-    async fn test_party_robin_returns_200_with_crux() {
-        let app = router(fixture());
-        let req = Request::builder()
-            .uri("/party/robin")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = std::str::from_utf8(&body).unwrap();
-        assert!(html.contains("Robin"), "party name missing");
-        assert!(html.contains("stain_is_damage"), "crux missing");
-        assert!(html.contains("$1050.00"), "refund amount missing");
-        assert!(html.contains("Wear-and-tear settlement"), "settlement card missing");
-    }
-
-    #[tokio::test]
-    async fn test_party_unknown_returns_404() {
-        let app = router(fixture());
-        let req = Request::builder()
-            .uri("/party/nobody")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn test_operator_returns_200_with_conflicts() {
-        let app = router(fixture());
-        let req = Request::builder()
-            .uri("/operator")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = std::str::from_utf8(&body).unwrap();
-        assert!(html.contains("Is the stain damage?"), "conflict description missing");
-        assert!(html.contains("ISOLATED"), "crux status missing");
-        assert!(html.contains("Claimed total $500 refuted"), "ledger finding missing");
-    }
-
-    #[tokio::test]
-    async fn test_static_htmx_route_is_wired() {
-        // The file is vendored; we just verify the route responds (not 404).
-        // ServeDir will serve it if the file exists on disk.
-        let app = router(fixture());
-        let req = Request::builder()
-            .uri("/static/htmx.min.js")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        // 200 = file found; anything other than 404 also means the route is
-        // wired (e.g. 304 Not Modified in some configs). We just check ≠ 404.
-        assert_ne!(
-            resp.status(),
-            StatusCode::NOT_FOUND,
-            "htmx.min.js not served — check static/ directory"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_settlement_accept_returns_fragment() {
-        let app = router(fixture());
-        let req = Request::builder()
-            .method("POST")
-            .uri("/settlement/0/accept")
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(Body::from("party=robin"))
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = std::str::from_utf8(&body).unwrap();
-        // Should return the card fragment, not a full page.
-        assert!(!html.contains("<!DOCTYPE"), "should be a fragment, not a full page");
-        assert!(html.contains("Wear-and-tear settlement"), "settlement label missing from fragment");
-        // Robin has accepted; waiting on the other party.
-        assert!(
-            html.contains("waiting on the other party"),
-            "acceptance message missing from fragment"
-        );
-    }
-}
+mod tests;

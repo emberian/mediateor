@@ -15,16 +15,29 @@
 use mediator_core::codegen::{build_obligations, build_preamble, standalone_theory};
 use mediator_core::load_dispute;
 use mediator_types::Verdict;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const ISABELLE: &str = "/Users/ember/isabelle/Isabelle2025-2.app/bin/isabelle";
 
 /// Run one obligation through real Isabelle and classify the outcome.
-fn run_obligation(preamble: &str, ob: &mediator_types::Obligation, idx: usize) -> Verdict {
-    let theory = standalone_theory(preamble, ob);
+///
+/// `home_user` is a private `ISABELLE_HOME_USER` shared across this test's
+/// obligations so the HOL image is built once, but isolated from any other
+/// agent's Isabelle store. Each obligation gets a *unique* theory + session
+/// name so they never collide in the shared build database.
+fn run_obligation(
+    preamble: &str,
+    ob: &mediator_types::Obligation,
+    idx: usize,
+    home_user: &Path,
+) -> Verdict {
+    // Give this obligation its own theory name to avoid sqlite primary-key
+    // collisions in the shared session-sources database.
+    let theory_name = format!("Mediator_Probe_{idx}");
+    let preamble_renamed = preamble.replacen("theory Mediator_Probe", &format!("theory {theory_name}"), 1);
+    let theory = standalone_theory(&preamble_renamed, ob);
 
-    // Unique session dir so parallel obligations never collide.
     let dir: PathBuf = std::env::temp_dir().join(format!(
         "mt-core-isa-{}-{}-{}",
         std::process::id(),
@@ -34,23 +47,22 @@ fn run_obligation(preamble: &str, ob: &mediator_types::Obligation, idx: usize) -
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create session dir");
 
-    // The theory name in the preamble is `Mediator_Probe`; the session bundles
-    // exactly that theory.
     let session = format!("Probe_{idx}");
     std::fs::write(
         dir.join("ROOT"),
-        format!("session {session} = HOL +\n  theories\n    Mediator_Probe\n"),
+        format!("session {session} = HOL +\n  theories\n    {theory_name}\n"),
     )
     .unwrap();
-    std::fs::write(dir.join("Mediator_Probe.thy"), &theory).unwrap();
+    std::fs::write(dir.join(format!("{theory_name}.thy")), &theory).unwrap();
 
-    let output = Command::new(ISABELLE)
-        .arg("build")
-        .arg("-d")
-        .arg(&dir)
-        .arg(&session)
-        .output()
-        .expect("invoke isabelle");
+    let mut cmd = Command::new(ISABELLE);
+    cmd.arg("build").arg("-d").arg(&dir).arg(&session);
+    // Only override the user home if asked (keeps the prebuilt system HOL image
+    // reachable by default, so we don't rebuild HOL from scratch).
+    if !home_user.as_os_str().is_empty() {
+        cmd.env("ISABELLE_HOME_USER", home_user);
+    }
+    let output = cmd.output().expect("invoke isabelle");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -93,9 +105,14 @@ fn roommate_reduction_checks_against_real_isabelle() {
     assert!(preamble.contains("theory Mediator_Probe"));
     assert!(!preamble.trim_end().ends_with("end"), "preamble must not close the theory");
 
+    // Use the default Isabelle user home so the prebuilt system HOL image is
+    // reused (an empty path means "don't override"). Unique per-obligation
+    // theory + session names keep the shared build database collision-free.
+    let home_user = PathBuf::new();
+
     let mut verdicts = std::collections::HashMap::new();
     for (i, ob) in obligations.iter().enumerate() {
-        let v = run_obligation(&preamble, ob, i);
+        let v = run_obligation(&preamble, ob, i, &home_user);
         eprintln!("obligation {:<22} -> {:?}", ob.name, v);
         // No obligation should be an Error — that would mean invalid Isabelle.
         assert!(

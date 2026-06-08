@@ -12,13 +12,17 @@
 //!   engineer pair. Everything: genuine conflicts with claim IDs, crux
 //!   status, ledger findings, settlement fairness certificates.
 //!
-//! - [`run`] — an interactive `ratatui` app (Party / Operator tabs, `q` to
-//!   quit). The renderers above are pure string functions re-used by the web
+//! - [`receipts_view`] — pure text rendering of the hash-chained receipt
+//!   ledger (seq, op, short hash, verdict) plus a chain-validity line.
+//!
+//! - [`run`] — an interactive `ratatui` app: one tab per party, plus
+//!   Operator and Receipts tabs. `Tab`/`←`/`→` to switch, `q` to quit.
+//!   The renderers above are pure string functions re-used by the web
 //!   crate and tests.
 //!
 //! Kindness is a property of the projection, not a softening of the math.
 
-use mediator_types::{Analysis, Dispute, Settlement};
+use mediator_types::{Analysis, Dispute, Receipt, Settlement, Verdict};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Money helpers
@@ -192,7 +196,7 @@ fn render_settlement_party(out: &mut String, s: &Settlement, n: usize, for_party
 /// Sections:
 /// 1. Shared core (stipulated facts)
 /// 2. Genuine conflicts (with claim IDs)
-/// 3. Dissolved (vocabulary mismatch, receipted)
+/// 3. Dissolved (vocabulary mismatch)
 /// 4. Crux status
 /// 5. Ledger findings
 /// 6. Settlement certificates
@@ -322,19 +326,126 @@ fn flag(b: bool) -> &'static str {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// receipts_view — pure text renderer for the hash-chained ledger
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Render the receipt ledger as a verifiable table. Output is UTF-8, no ANSI.
+///
+/// Each row: `#seq  op_name  short_hash…  verdict`
+/// Final line: `✓ chain verified (N links)` or `✗ chain broken at entry I`.
+///
+/// `verify_fn` accepts the receipts slice and returns `Ok(())` or `Err(idx)` —
+/// pass `mediator_core::receipts::verify_chain` in production; inject a stub
+/// in tests.
+pub fn receipts_view(receipts: &[Receipt], verify_fn: fn(&[Receipt]) -> Result<(), usize>) -> String {
+    let mut out = String::with_capacity(512);
+
+    out.push_str("RECEIPT LEDGER  (append-only, hash-chained)\n");
+    out.push_str("════════════════════════════════════════════════════════\n\n");
+
+    if receipts.is_empty() {
+        out.push_str("  (no receipts yet)\n\n");
+    } else {
+        out.push_str("  #    operation            hash (first 12)  verdict\n");
+        out.push_str("  ─────────────────────────────────────────────────────\n");
+        for r in receipts {
+            let short_hash = if r.hash.len() >= 12 { &r.hash[..12] } else { &r.hash };
+            let verdict_str = match &r.verdict {
+                Some(Verdict::Proved) => "Proved",
+                Some(Verdict::Refuted) => "Refuted",
+                Some(Verdict::Unknown) => "Unknown",
+                Some(Verdict::Error(e)) => {
+                    // Truncate long errors for display
+                    let _ = e; // used via the format below
+                    "Error"
+                }
+                None => "—",
+            };
+            out.push_str(&format!(
+                "  {:<4} {:<20} {}…  {}\n",
+                format!("#{}", r.seq),
+                r.op,
+                short_hash,
+                verdict_str,
+            ));
+        }
+        out.push('\n');
+
+        // Prev-hash chain detail (one indent-level deeper)
+        out.push_str("  prev-hash links\n");
+        out.push_str("  ───────────────\n");
+        for r in receipts {
+            let prev_short = if r.prev_hash.len() >= 8 { &r.prev_hash[..8] } else { &r.prev_hash };
+            let hash_short = if r.hash.len() >= 8 { &r.hash[..8] } else { &r.hash };
+            out.push_str(&format!("  #{}: {}… → {}…\n", r.seq, prev_short, hash_short));
+        }
+        out.push('\n');
+    }
+
+    // Chain validity summary
+    match verify_fn(receipts) {
+        Ok(()) => out.push_str(&format!(
+            "  ✓  hash chain verified ({} link{})\n",
+            receipts.len(),
+            if receipts.len() == 1 { "" } else { "s" },
+        )),
+        Err(i) => out.push_str(&format!("  ✗  hash chain broken at entry #{i}\n")),
+    }
+
+    out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Interactive TUI — ratatui + crossterm
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Run an interactive ratatui application with two tabs:
-/// - **Party** tab — rendered with [`party_view`] for each party; cycle with
-///   left/right arrows, or `1`/`2` to jump.
-/// - **Operator** tab — the cockpit, rendered with [`operator_view`].
+/// Tab identity — one per party, plus the two fixed tabs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Party(usize),
+    Operator,
+    Receipts,
+}
+
+/// Run an interactive ratatui application:
+/// - One tab per party (their kind party view, by name)
+/// - **Operator** tab — the cockpit
+/// - **Receipts** tab — the hash-chained ledger, with chain-validity line
 ///
-/// Keys: `Tab` / `←` / `→` to switch tabs, `q` / `Esc` to quit.
+/// Keys: `Tab` / `→` to advance, `←` to go back, `q` / `Esc` to quit,
+///       `↑` / `↓` / `PgUp` / `PgDn` to scroll.
 ///
-/// The string renderers are called fresh on each redraw, keeping rendering
-/// logic cleanly separated from the event loop.
+/// The string renderers are called once at startup (pure, no TTY needed) and
+/// the results are stored; the event loop just re-renders on state change.
 pub fn run(analysis: Analysis, dispute: Dispute) -> std::io::Result<()> {
+    run_with_verify(analysis, dispute, |_| Ok(()))
+}
+
+/// Like [`run`] but accepts any chain-verify function (used for testing the
+/// receipts rendering path without Isabelle receipts).
+pub fn run_with_receipts(
+    analysis: Analysis,
+    dispute: Dispute,
+    receipts: Vec<Receipt>,
+    verify_fn: fn(&[Receipt]) -> Result<(), usize>,
+) -> std::io::Result<()> {
+    run_impl(analysis, dispute, receipts, verify_fn)
+}
+
+fn run_with_verify(
+    analysis: Analysis,
+    dispute: Dispute,
+    verify_fn: fn(&[Receipt]) -> Result<(), usize>,
+) -> std::io::Result<()> {
+    run_impl(analysis, dispute, vec![], verify_fn)
+}
+
+fn run_impl(
+    analysis: Analysis,
+    dispute: Dispute,
+    receipts: Vec<Receipt>,
+    verify_fn: fn(&[Receipt]) -> Result<(), usize>,
+) -> std::io::Result<()> {
     use crossterm::{
         event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
         execute,
@@ -357,183 +468,229 @@ pub fn run(analysis: Analysis, dispute: Dispute) -> std::io::Result<()> {
     let backend = CrosstermBackend::new(stderr);
     let mut terminal = Terminal::new(backend)?;
 
-    // ── App state ─────────────────────────────────────────────────────────
-    // Tab 0 = Party view; tabs 1..n = one per party; last tab = Operator
+    // ── Pre-render all tab content (pure; no TTY dependency) ──────────────
     let party_ids: Vec<String> = dispute.parties.iter().map(|p| p.id.clone()).collect();
     let party_names: Vec<String> = dispute.parties.iter().map(|p| p.display_name.clone()).collect();
-    let n_party_tabs = party_ids.len().max(1);
-    let operator_tab_idx = n_party_tabs;
-    let total_tabs = n_party_tabs + 1;
 
-    // Pre-render strings so we don't re-allocate every frame unless we want to.
-    let party_texts: Vec<String> = party_ids
-        .iter()
-        .map(|id| party_view(&analysis, id))
-        .collect();
-    // If no parties, show a generic view
-    let generic_party = if party_ids.is_empty() {
-        party_view(&analysis, "")
-    } else {
-        String::new()
-    };
+    let party_texts: Vec<String> = party_ids.iter().map(|id| party_view(&analysis, id)).collect();
     let op_text = operator_view(&analysis);
+    let rec_text = receipts_view(&receipts, verify_fn);
 
-    let mut selected_tab: usize = 0;
+    // Tab order: party_0, party_1, …, Operator, Receipts
+    let n_parties = party_ids.len().max(1);
+    let tab_count = n_parties + 2; // +Operator +Receipts
+
+    let tab_at = |idx: usize| -> Tab {
+        if idx < n_parties { Tab::Party(idx) }
+        else if idx == n_parties { Tab::Operator }
+        else { Tab::Receipts }
+    };
+    let idx_of = |tab: Tab| -> usize {
+        match tab {
+            Tab::Party(i) => i,
+            Tab::Operator => n_parties,
+            Tab::Receipts => n_parties + 1,
+        }
+    };
+
+    let mut selected_tab: Tab = Tab::Party(0);
     let mut scroll_offset: u16 = 0;
 
+    // ── Colors ────────────────────────────────────────────────────────────
+    // Warm amber for the header wordmark; teal/cyan for party tabs;
+    // yellow for operator; magenta for receipts.
+    let accent_for = |tab: Tab| -> Color {
+        match tab {
+            Tab::Party(_) => Color::Cyan,
+            Tab::Operator => Color::Yellow,
+            Tab::Receipts => Color::Magenta,
+        }
+    };
+
     // ── Render closure ────────────────────────────────────────────────────
-    let render = |terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
-                  selected_tab: usize,
-                  scroll_offset: u16,
-                  party_texts: &[String],
-                  generic_party: &str,
-                  op_text: &str,
-                  party_names: &[String],
-                  operator_tab_idx: usize|
-     -> io::Result<()> {
+    let draw = |terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
+                selected_tab: Tab,
+                scroll_offset: u16| -> io::Result<()> {
         terminal.draw(|f| {
             let size = f.area();
 
-            // Top/body split
+            // Layout: header (1 line) | tab-bar (3 lines) | body | hint (1 line)
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(1), // wordmark header
+                    Constraint::Length(3), // tab bar
+                    Constraint::Min(0),    // content
+                    Constraint::Length(1), // key hints
+                ])
                 .split(size);
 
-            // ── Tab bar ────────────────────────────────────────────────
+            // ── Wordmark header ────────────────────────────────────────────
+            // "  Mediateor ☄   ·   <dispute title>"
+            let header_line = Line::from(vec![
+                Span::styled(
+                    "  Mediateor ☄  ",
+                    Style::default()
+                        .fg(Color::Rgb(255, 160, 60)) // warm amber
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "·  ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    dispute.title.as_str(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]);
+            f.render_widget(
+                Paragraph::new(header_line)
+                    .style(Style::default().bg(Color::Rgb(20, 20, 28))),
+                chunks[0],
+            );
+
+            // ── Tab bar ────────────────────────────────────────────────────
             let tab_labels: Vec<Line> = {
-                let mut labels: Vec<Line> = party_names
-                    .iter()
-                    .map(|n| Line::from(Span::raw(n.as_str())))
-                    .collect();
-                if labels.is_empty() {
-                    labels.push(Line::from("Party"));
-                }
+                let mut labels: Vec<Line> = if party_names.is_empty() {
+                    vec![Line::from("Party")]
+                } else {
+                    party_names.iter().map(|n| Line::from(n.as_str())).collect()
+                };
                 labels.push(Line::from("Operator"));
+                labels.push(Line::from("Receipts"));
                 labels
             };
 
+            let selected_idx = idx_of(selected_tab);
             let tabs_widget = Tabs::new(tab_labels)
-                .block(Block::default().borders(Borders::ALL).title(" Mediator "))
-                .select(selected_tab)
-                .style(Style::default().fg(Color::White))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::DarkGray)),
+                )
+                .select(selected_idx)
+                .style(Style::default().fg(Color::DarkGray))
                 .highlight_style(
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(accent_for(selected_tab))
                         .add_modifier(Modifier::BOLD),
                 );
-            f.render_widget(tabs_widget, chunks[0]);
+            f.render_widget(tabs_widget, chunks[1]);
 
-            // ── Body ───────────────────────────────────────────────────
-            let content: &str = if selected_tab == operator_tab_idx {
-                op_text
-            } else if party_texts.is_empty() {
-                generic_party
-            } else {
-                party_texts
-                    .get(selected_tab)
+            // ── Body ───────────────────────────────────────────────────────
+            let content: &str = match selected_tab {
+                Tab::Party(i) => party_texts
+                    .get(i)
                     .map(|s| s.as_str())
-                    .unwrap_or(generic_party)
+                    .unwrap_or("(no party data)"),
+                Tab::Operator => &op_text,
+                Tab::Receipts => &rec_text,
             };
 
-            let (border_color, title) = if selected_tab == operator_tab_idx {
-                (Color::Yellow, " Operator Cockpit ")
-            } else {
-                (Color::Cyan, " Party View ")
+            let title = match selected_tab {
+                Tab::Party(i) => {
+                    let name = party_names.get(i).map(|s| s.as_str()).unwrap_or("Party");
+                    format!(" {name} ")
+                }
+                Tab::Operator => " Operator Cockpit ".to_string(),
+                Tab::Receipts => " Receipt Ledger ".to_string(),
             };
+
+            let accent = accent_for(selected_tab);
 
             let para = Paragraph::new(content)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(title)
-                        .border_style(Style::default().fg(border_color)),
+                        .title(Span::styled(
+                            title.as_str(),
+                            Style::default()
+                                .fg(accent)
+                                .add_modifier(Modifier::BOLD),
+                        ))
+                        .border_style(Style::default().fg(accent)),
                 )
                 .wrap(Wrap { trim: false })
                 .scroll((scroll_offset, 0));
-            f.render_widget(para, chunks[1]);
+            f.render_widget(para, chunks[2]);
 
-            // ── Help line overlay ──────────────────────────────────────
-            let help = Paragraph::new(
-                " Tab/←/→: switch  q/Esc: quit  ↑↓: scroll ",
-            )
-            .style(Style::default().fg(Color::DarkGray));
-            // Render in bottom-right corner of the body block
-            let help_area = ratatui::layout::Rect {
-                x: chunks[1].x + 1,
-                y: chunks[1].y + chunks[1].height.saturating_sub(1),
-                width: chunks[1].width.saturating_sub(2),
-                height: 1,
-            };
-            f.render_widget(help, help_area);
+            // ── Key hint bar ───────────────────────────────────────────────
+            let hint = Line::from(vec![
+                Span::styled(" Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled("/", Style::default().fg(Color::DarkGray)),
+                Span::styled("←→", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(" switch tab   ", Style::default().fg(Color::DarkGray)),
+                Span::styled("↑↓ PgUp PgDn", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(" scroll   ", Style::default().fg(Color::DarkGray)),
+                Span::styled("q", Style::default().fg(Color::Rgb(255, 100, 100)).add_modifier(Modifier::BOLD)),
+                Span::styled(" quit", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "   ☄  mediateor",
+                    Style::default().fg(Color::Rgb(255, 160, 60)),
+                ),
+            ]);
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().bg(Color::Rgb(20, 20, 28))),
+                chunks[3],
+            );
         })?;
         Ok(())
     };
 
     // Initial draw
-    render(
-        &mut terminal,
-        selected_tab,
-        scroll_offset,
-        &party_texts,
-        &generic_party,
-        &op_text,
-        &party_names,
-        operator_tab_idx,
-    )?;
+    draw(&mut terminal, selected_tab, scroll_offset)?;
 
     // ── Event loop ────────────────────────────────────────────────────────
     loop {
         if event::poll(std::time::Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
-                // Only handle press events (not release/repeat on some backends)
                 if key.kind == KeyEventKind::Press {
+                    let mut changed = true;
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
+
                         KeyCode::Tab | KeyCode::Right => {
-                            selected_tab = (selected_tab + 1) % total_tabs;
+                            let next = (idx_of(selected_tab) + 1) % tab_count;
+                            selected_tab = tab_at(next);
                             scroll_offset = 0;
                         }
                         KeyCode::Left => {
-                            selected_tab = if selected_tab == 0 {
-                                total_tabs - 1
-                            } else {
-                                selected_tab - 1
-                            };
+                            let cur = idx_of(selected_tab);
+                            let prev = if cur == 0 { tab_count - 1 } else { cur - 1 };
+                            selected_tab = tab_at(prev);
                             scroll_offset = 0;
                         }
+
+                        // Jump to party tabs by number (1-based); O = Operator; R = Receipts
                         KeyCode::Char(c) if c.is_ascii_digit() => {
-                            let n = c as usize - '0' as usize;
-                            if n > 0 && n <= total_tabs {
-                                selected_tab = n - 1;
+                            let n = (c as usize).saturating_sub('0' as usize);
+                            if n > 0 && n <= n_parties {
+                                selected_tab = Tab::Party(n - 1);
                                 scroll_offset = 0;
                             }
                         }
-                        KeyCode::Down => {
-                            scroll_offset = scroll_offset.saturating_add(1);
+                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                            selected_tab = Tab::Operator;
+                            scroll_offset = 0;
                         }
-                        KeyCode::Up => {
-                            scroll_offset = scroll_offset.saturating_sub(1);
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            selected_tab = Tab::Receipts;
+                            scroll_offset = 0;
                         }
-                        KeyCode::PageDown => {
-                            scroll_offset = scroll_offset.saturating_add(20);
-                        }
-                        KeyCode::PageUp => {
-                            scroll_offset = scroll_offset.saturating_sub(20);
-                        }
-                        _ => {}
+
+                        KeyCode::Down => scroll_offset = scroll_offset.saturating_add(1),
+                        KeyCode::Up => scroll_offset = scroll_offset.saturating_sub(1),
+                        KeyCode::PageDown => scroll_offset = scroll_offset.saturating_add(20),
+                        KeyCode::PageUp => scroll_offset = scroll_offset.saturating_sub(20),
+
+                        _ => { changed = false; }
                     }
 
-                    render(
-                        &mut terminal,
-                        selected_tab,
-                        scroll_offset,
-                        &party_texts,
-                        &generic_party,
-                        &op_text,
-                        &party_names,
-                        operator_tab_idx,
-                    )?;
+                    if changed {
+                        draw(&mut terminal, selected_tab, scroll_offset)?;
+                    }
                 }
             }
         }
@@ -558,11 +715,10 @@ pub fn run(analysis: Analysis, dispute: Dispute) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mediator_types::{Analysis, Conflict, Settlement};
+    use mediator_types::{Analysis, Conflict, Receipt, Settlement};
+    use serde_json::json;
 
-    /// Build a representative `Analysis` covering all the interesting cases:
-    /// shared facts, one Conflict with claim IDs, a crux, ledger findings,
-    /// and one certified-fair settlement.
+    /// Build a representative `Analysis` covering all the interesting cases.
     fn sample_analysis() -> Analysis {
         Analysis {
             shared_core: vec![
@@ -605,6 +761,44 @@ mod tests {
                     .to_string(),
             }],
         }
+    }
+
+    /// Build a small valid receipt chain.
+    fn sample_receipts() -> Vec<Receipt> {
+        let genesis = "0000000000000000000000000000000000000000000000000000000000000000";
+        // Compute hashes properly so verify_chain passes
+        use sha2::{Digest, Sha256};
+        let chain_hash = |prev: &str, op: &str, detail: &serde_json::Value| -> String {
+            let mut h = Sha256::new();
+            h.update(prev.as_bytes());
+            h.update(op.as_bytes());
+            h.update(serde_json::to_vec(detail).unwrap_or_default());
+            h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        };
+
+        let d0 = json!({"items": 2});
+        let h0 = chain_hash(genesis, "verify_ledger", &d0);
+        let d1 = json!({"verdict": "Proved"});
+        let h1 = chain_hash(&h0, "isolate_crux", &d1);
+
+        vec![
+            Receipt {
+                seq: 0,
+                prev_hash: genesis.to_string(),
+                hash: h0.clone(),
+                op: "verify_ledger".to_string(),
+                detail: d0,
+                verdict: Some(Verdict::Proved),
+            },
+            Receipt {
+                seq: 1,
+                prev_hash: h0,
+                hash: h1,
+                op: "isolate_crux".to_string(),
+                detail: d1,
+                verdict: Some(Verdict::Unknown),
+            },
+        ]
     }
 
     // ── party_view tests ────────────────────────────────────────────────────
@@ -727,7 +921,6 @@ mod tests {
     fn operator_view_contains_fairness_certs() {
         let analysis = sample_analysis();
         let view = operator_view(&analysis);
-        // envy_free / equitable / pareto flags
         assert!(
             view.contains("envy-free"),
             "operator_view must show envy-free certificate\ngot:\n{view}"
@@ -745,6 +938,76 @@ mod tests {
         assert!(
             view.contains("DISSOLVED"),
             "operator_view must have a DISSOLVED section\ngot:\n{view}"
+        );
+    }
+
+    // ── receipts_view tests ─────────────────────────────────────────────────
+
+    fn always_ok(_: &[Receipt]) -> Result<(), usize> { Ok(()) }
+    fn always_err(_: &[Receipt]) -> Result<(), usize> { Err(0) }
+
+    #[test]
+    fn receipts_view_empty_shows_no_receipts() {
+        let view = receipts_view(&[], always_ok);
+        assert!(view.contains("no receipts yet"), "got:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_shows_chain_verified() {
+        let receipts = sample_receipts();
+        // Use the always_ok stub so we don't need the sha2 dep to verify
+        let view = receipts_view(&receipts, always_ok);
+        assert!(view.contains("✓"), "should show chain-valid checkmark\ngot:\n{view}");
+        assert!(view.contains("chain verified"), "should mention chain verified\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_shows_broken_chain() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_err);
+        assert!(view.contains("✗"), "should show broken-chain marker\ngot:\n{view}");
+        assert!(view.contains("broken"), "should mention broken chain\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_lists_ops() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_ok);
+        assert!(view.contains("verify_ledger"), "should list op names\ngot:\n{view}");
+        assert!(view.contains("isolate_crux"), "should list op names\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_lists_verdicts() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_ok);
+        assert!(view.contains("Proved"), "should show Proved verdict\ngot:\n{view}");
+        assert!(view.contains("Unknown"), "should show Unknown verdict\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_shows_short_hashes() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_ok);
+        // Each row should have a truncated hash followed by "…"
+        assert!(view.contains('…'), "should show truncated hashes with ellipsis\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_shows_prev_links() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_ok);
+        assert!(view.contains("prev-hash links"), "should show prev-hash link section\ngot:\n{view}");
+        assert!(view.contains("→"), "should show link arrows\ngot:\n{view}");
+    }
+
+    #[test]
+    fn receipts_view_link_count() {
+        let receipts = sample_receipts();
+        let view = receipts_view(&receipts, always_ok);
+        assert!(
+            view.contains("2 links"),
+            "should report correct link count\ngot:\n{view}"
         );
     }
 

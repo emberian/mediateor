@@ -1,0 +1,130 @@
+{
+  "analysis": {
+    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "dissolved": [
+      "The $10000.00-vs-$14000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $14000.00."
+    ],
+    "genuine_conflicts": [],
+    "ledger_findings": [
+      "$34000.00 back if the stain is ordinary wear; $26000.00 back if it counts as damage.",
+      "The verbal figure of $10000.00 in deductions is not what the itemization supports — the itemized deductions total $14000.00."
+    ],
+    "ledger_refund_cents": 3400000,
+    "settlements": [
+      {
+        "allocations": [
+          [
+            "piano",
+            "jordan"
+          ],
+          [
+            "paintings",
+            "alex"
+          ],
+          [
+            "china",
+            "jordan"
+          ],
+          [
+            "tools",
+            "alex"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Adjusted Winner settlement:\n  The family piano → jordan (whole item)\n  Mum's paintings → alex (whole item)\n  The good china set → jordan (whole item)\n  Dad's woodworking tools → alex (whole item)\nFinal point totals: alex = 70.0000, jordan = 70.0000\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
+        "label": "Adjusted Winner",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "alex",
+            70.0
+          ],
+          [
+            "jordan",
+            70.0
+          ]
+        ],
+        "splits": []
+      }
+    ],
+    "shared_core": [
+      "You both stipulate: Share reduced exactly when gift was advance.",
+      "You both agree the shared funeral costs was $6000.00 and comes out of the deposit.",
+      "The deposit held is $40000.00."
+    ]
+  },
+  "receipts": [
+    {
+      "detail": {
+        "n_axioms": 1,
+        "n_obligations": 6,
+        "obligations": [
+          "refund_damage_world",
+          "refund_wear_world",
+          "over_claim_refuted",
+          "crux_iff",
+          "crux_is_damage",
+          "crux_is_wear"
+        ],
+        "theory": "Mediator_Probe"
+      },
+      "hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "op": "build_preamble",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seq": 0,
+      "verdict": null
+    },
+    {
+      "detail": {
+        "damage_world": "Proved",
+        "refund_if_damage_cents": 2600000,
+        "refund_if_wear_cents": 3400000,
+        "wear_world": "Proved"
+      },
+      "hash": "603a4e7a6ebf1fa98a50055d25cfb71df33d08955de4a617a2bdd6854cdafed4",
+      "op": "verify_ledger",
+      "prev_hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "seq": 1,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "claimed_total_cents": 1000000,
+        "itemized_total_cents": 1400000,
+        "verdict": "Proved"
+      },
+      "hash": "025e69ee2b38c7523d03e356420a106abf463b23fbad5540f94a0c1d828e629c",
+      "op": "refute_overclaim",
+      "prev_hash": "603a4e7a6ebf1fa98a50055d25cfb71df33d08955de4a617a2bdd6854cdafed4",
+      "seq": 2,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "crux_iff": "Proved",
+        "crux_is_damage": "Unknown",
+        "crux_is_wear": "Unknown"
+      },
+      "hash": "991f6d557e3b236b5e844d75a1a0014607c35c7a3053cda4e61db17d31e17ef3",
+      "op": "isolate_crux",
+      "prev_hash": "025e69ee2b38c7523d03e356420a106abf463b23fbad5540f94a0c1d828e629c",
+      "seq": 3,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "envy_free": true,
+        "labels": [
+          "Adjusted Winner"
+        ],
+        "n_settlements": 1
+      },
+      "hash": "3fab5e5ca97a64e75b7f82c35f4fc7c542c904c81226a326f297ac5628af24ea",
+      "op": "fair_division",
+      "prev_hash": "991f6d557e3b236b5e844d75a1a0014607c35c7a3053cda4e61db17d31e17ef3",
+      "seq": 4,
+      "verdict": null
+    }
+  ]
+}

@@ -6,6 +6,11 @@ license.workspace = true
 
 [dependencies]
 mediator-types = { workspace = true }
+# Optional: compute an Analysis on the fly when no cache sits beside a scenario.
+# The app prefers the cache (instant, no Isabelle needed); these are the fallback.
+mediator-core = { workspace = true }
+mediator-prover = { workspace = true }
+mediator-fairdiv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

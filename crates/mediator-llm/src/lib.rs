@@ -476,6 +476,89 @@ pub fn default_operator() -> Box<dyn LlmOperator> {
     }
 }
 
+// ──────────────────────── clean public entry points ──────────────────────
+
+/// The result of formalizing a natural-language claim with a single operator.
+///
+/// `operator_name` identifies which concrete operator was used so the caller
+/// can log and the `formalize` binary can print it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormalizationResult {
+    /// Human-readable name of the operator that produced the proposal.
+    pub operator_name: String,
+    /// The proposed [`Formula`].
+    pub formula: Formula,
+    /// A plain-English back-render of the formula (advisory; the deterministic
+    /// renderer in `mediator-core` is the trusted one for display, but this is
+    /// consistent with what the operator produces).
+    pub english: String,
+    /// If the operator was a fallback (no model reachable), this note says so.
+    pub fallback_note: Option<String>,
+}
+
+/// Formalize a natural-language claim using a single operator.
+///
+/// On success, returns a [`FormalizationResult`] with the proposed formula,
+/// its English rendering, and which operator was used.
+///
+/// On failure, returns an `Err` with the operator's error message.
+pub fn formalize_nl(
+    op: &dyn LlmOperator,
+    operator_name: &str,
+    nl: &str,
+    sig: &[Sig],
+) -> Result<FormalizationResult, String> {
+    let formula = op.formalize(nl, sig)?;
+    let english = op.render_english(&formula);
+    Ok(FormalizationResult {
+        operator_name: operator_name.to_string(),
+        formula,
+        english,
+        fallback_note: None,
+    })
+}
+
+/// Formalize a natural-language claim using a council of operators, then
+/// return the majority-agreed formula together with the per-operator details.
+///
+/// This is the framing-bias-resistant path: the vote is over normalized
+/// [`Formula`] IR, never over prose. See [`council_formalize`] for the
+/// vote mechanics.
+///
+/// Returns an `Err` only when *all* operators fail.
+pub fn council_formalize_nl(
+    ops: &[(&dyn LlmOperator, &str)],
+    nl: &str,
+    sig: &[Sig],
+) -> Result<(FormalizationResult, Vec<(Formula, usize)>), String> {
+    let raw_ops: Vec<&dyn LlmOperator> = ops.iter().map(|(op, _)| *op).collect();
+    let result = council_formalize(&raw_ops, nl, sig)?;
+
+    // Use the first operator that produced the winning formula to render English.
+    // If none can be identified, fall back to the module-level renderer.
+    let english = {
+        let winner_op = ops.iter().find_map(|(op, _)| {
+            op.formalize(nl, sig)
+                .ok()
+                .filter(|f| *f == result.agreed)
+                .map(|_| *op)
+        });
+        winner_op
+            .map(|op| op.render_english(&result.agreed))
+            .unwrap_or_else(|| render_english(&result.agreed))
+    };
+
+    let operator_names: Vec<&str> = ops.iter().map(|(_, name)| *name).collect();
+    let agreed_result = FormalizationResult {
+        operator_name: format!("council[{}]", operator_names.join(", ")),
+        formula: result.agreed,
+        english,
+        fallback_note: None,
+    };
+
+    Ok((agreed_result, result.dissent))
+}
+
 // ─────────────────────────────── tests ───────────────────────────────────
 
 #[cfg(test)]
@@ -705,5 +788,69 @@ mod tests {
         let lt = render_english(&Formula::Lt(a, b));
         assert!(le.contains('≤'), "Le: {le}");
         assert!(lt.contains('<'), "Lt: {lt}");
+    }
+
+    // ── formalize_nl / council_formalize_nl ─────────────────────────────
+
+    #[test]
+    fn formalize_nl_basic() {
+        let op = ScriptedOperator;
+        let nl = "The carpet stain was ordinary wear and tear, not damage I should pay for.";
+        let result = formalize_nl(&op, "ScriptedOperator", nl, &roommate_sig())
+            .expect("should succeed");
+        assert_eq!(result.operator_name, "ScriptedOperator");
+        let expected = Formula::Not(Box::new(Formula::Atom(Term::App(
+            "stain_is_damage".into(),
+            vec![],
+        ))));
+        assert_eq!(result.formula, expected, "formula should match");
+        assert!(result.english.contains("not"), "english should mention negation: {}", result.english);
+        assert!(result.fallback_note.is_none());
+    }
+
+    #[test]
+    fn council_formalize_nl_basic() {
+        let a = ScriptedOperator;
+        let b = ScriptedOperator;
+        let ops: Vec<(&dyn LlmOperator, &str)> = vec![(&a, "ScriptedA"), (&b, "ScriptedB")];
+        let nl = "The stain is damage Robin caused, so Robin owes the carpet repair.";
+        let (result, dissent) = council_formalize_nl(&ops, nl, &roommate_sig())
+            .expect("council should succeed");
+        let expected = Formula::Atom(Term::App("stain_is_damage".into(), vec![]));
+        assert_eq!(result.formula, expected);
+        assert!(result.operator_name.contains("council"), "name: {}", result.operator_name);
+        assert!(result.operator_name.contains("ScriptedA"));
+        assert!(result.operator_name.contains("ScriptedB"));
+        assert!(dissent.is_empty(), "no dissent when all agree");
+    }
+
+    #[test]
+    fn council_formalize_nl_with_dissent() {
+        struct AlwaysAtom;
+        impl LlmOperator for AlwaysAtom {
+            fn formalize(&self, _nl: &str, _sig: &[Sig]) -> Result<Formula, String> {
+                Ok(Formula::Atom(Term::App("stain_is_damage".into(), vec![])))
+            }
+            fn render_english(&self, f: &Formula) -> String {
+                render_english(f)
+            }
+        }
+
+        let a = ScriptedOperator;
+        let b = ScriptedOperator;
+        let c = AlwaysAtom;
+        let ops: Vec<(&dyn LlmOperator, &str)> = vec![(&a, "ScriptedA"), (&b, "ScriptedB"), (&c, "AlwaysAtom")];
+        let nl = "The carpet stain was ordinary wear and tear, not damage I should pay for.";
+        let (result, dissent) = council_formalize_nl(&ops, nl, &roommate_sig())
+            .expect("council should succeed");
+
+        // ScriptedOperator wins (×2), AlwaysAtom is minority
+        let expected_winner = Formula::Not(Box::new(Formula::Atom(Term::App(
+            "stain_is_damage".into(),
+            vec![],
+        ))));
+        assert_eq!(result.formula, expected_winner);
+        assert_eq!(dissent.len(), 1, "one dissenting formula");
+        assert_eq!(dissent[0].1, 1, "minority got 1 vote");
     }
 }

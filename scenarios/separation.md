@@ -1,0 +1,3 @@
+Alex and Sam shared an apartment for three years and are parting on decent terms — but not on the apartment deposit, where the landlord flagged some wall scuffs and a cracked bathroom tile. Sam says Alex caused them; Alex says the scuffs were there on move-in day and the tile crack is just age.
+
+The kernel certifies the deposit math ($100 cleaning fee is undisputed; $250 repair charge is contingent), surfaces Sam's rough "$400 total" estimate as a number to correct rather than a grievance, and reduces the whole question to one open point: is the damage attributable to Alex or to ordinary wear? Mochi the cat goes to Alex — the fair-division algorithm handles that one cleanly.

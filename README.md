@@ -109,24 +109,35 @@ flying as a pair).
 
 ## Run it
 
-Prerequisites: a Rust toolchain and Isabelle2025-2 (the prover path is
-auto-located; override with `MEDIATEOR_ISABELLE`/`IsabelleProver::new`).
+Prerequisites: a Rust toolchain and Isabelle2025-2 (auto-located at
+`~/isabelle/Isabelle2025-2.app`; override with `MEDIATEOR_ISABELLE`).
 
 ```sh
-# the foundation stone — the thesis, machine-checked
-isabelle build -D isabelle               # Keystone + the deontic library
-
-# the kernel and its pieces
-cargo test                               # per-crate tests (prover hits real Isabelle)
-
-# the demo, end to end on the roommate dispute
-cargo run -p mediator-demo -- scenarios/roommate.json     # CLI + TUI
-cargo run -p mediator-web                                 # then open http://127.0.0.1:3000
+./run.sh          # build + cache + web + open browser — one command, that's it
 ```
 
 Everything runs **offline and deterministically** by default — the LLM operator
-falls back to a scripted formalizer so the demo never depends on a network or a
+falls back to a scripted formalizer so the demo never needs a network or an API
 key. Point it at Bedrock / LM Studio to let live models drive the kernel.
+
+Handy `just` targets (install: `cargo install just` or `brew install just`):
+
+```sh
+just demo         # CLI walkthrough on the roommate dispute
+just tui          # same, in the interactive terminal app
+just web          # web server only (expects caches; run just cache first)
+just cache        # regenerate all analysis caches via the full Isabelle pipeline
+just verify       # isabelle build -D isabelle + cargo test --workspace
+```
+
+See `DEMO.md` for a guided 60-second walkthrough of what to show and why it's
+impressive.
+
+## Disputes
+
+| Scenario | What it demonstrates |
+|---|---|
+| `roommate.json` | Security-deposit dispute between Robin and Sam. The ledger refutes an over-claim by arithmetic; the entire money question reduces to one predicate (`stain_is_damage`), which the kernel hands back undecided; Adjusted Winner splits the furniture envy-free. **The canonical demo.** |
 
 ## Why this shape (the honest part)
 

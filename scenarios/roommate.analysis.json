@@ -1,0 +1,143 @@
+{
+  "analysis": {
+    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "dissolved": [
+      "The $500.00-vs-$450.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $450.00."
+    ],
+    "genuine_conflicts": [
+      {
+        "claim_ids": [
+          "r1",
+          "s1"
+        ],
+        "description": "Whether the carpet stain is chargeable damage or ordinary wear — a real disagreement of fact and judgment, not just different words.",
+        "parties": [
+          "robin",
+          "sam"
+        ]
+      }
+    ],
+    "ledger_findings": [
+      "$1050.00 back if the stain is ordinary wear; $750.00 back if it counts as damage.",
+      "The verbal figure of $500.00 in deductions is not what the itemization supports — the itemized deductions total $450.00."
+    ],
+    "ledger_refund_cents": 105000,
+    "settlements": [
+      {
+        "allocations": [
+          [
+            "couch",
+            "robin"
+          ],
+          [
+            "kitchenware",
+            "sam"
+          ],
+          [
+            "bookshelf",
+            "sam"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Adjusted Winner settlement:\n  The shared couch → robin (whole item)\n  Kitchenware set → sam (whole item)\n  Bookshelf → sam (whole item)\n  Standing desk → split: 53.8% to robin, 46.2% to sam\nFinal point totals: robin = 58.8462, sam = 58.8462\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
+        "label": "Adjusted Winner",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "robin",
+            58.84615384615385
+          ],
+          [
+            "sam",
+            58.84615384615385
+          ]
+        ],
+        "splits": [
+          [
+            "standing_desk",
+            0.5384615384615384
+          ]
+        ]
+      }
+    ],
+    "shared_core": [
+      "You both stipulate: The tenant must bear the carpet repair cost exactly when the carpet stain is chargeable damage.",
+      "You both agree the professional cleaning was $150.00 and comes out of the deposit.",
+      "The deposit held is $1200.00."
+    ]
+  },
+  "receipts": [
+    {
+      "detail": {
+        "n_axioms": 1,
+        "n_obligations": 6,
+        "obligations": [
+          "refund_damage_world",
+          "refund_wear_world",
+          "over_claim_refuted",
+          "crux_iff",
+          "crux_is_damage",
+          "crux_is_wear"
+        ],
+        "theory": "Mediator_Probe"
+      },
+      "hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "op": "build_preamble",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seq": 0,
+      "verdict": null
+    },
+    {
+      "detail": {
+        "damage_world": "Proved",
+        "refund_if_damage_cents": 75000,
+        "refund_if_wear_cents": 105000,
+        "wear_world": "Proved"
+      },
+      "hash": "3f2531e29347694147ae8664efcc7b5c75a33f914e6934dd6a03aacc0d97f507",
+      "op": "verify_ledger",
+      "prev_hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "seq": 1,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "claimed_total_cents": 50000,
+        "itemized_total_cents": 45000,
+        "verdict": "Proved"
+      },
+      "hash": "673960383302ede0e7106448524135784f8ce1782fead620c8dcb988613de511",
+      "op": "refute_overclaim",
+      "prev_hash": "3f2531e29347694147ae8664efcc7b5c75a33f914e6934dd6a03aacc0d97f507",
+      "seq": 2,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "crux_iff": "Proved",
+        "crux_is_damage": "Unknown",
+        "crux_is_wear": "Unknown"
+      },
+      "hash": "a52b93b75940dabb09bad3d9e73ea28bf27fd543599efdd349e758044f941883",
+      "op": "isolate_crux",
+      "prev_hash": "673960383302ede0e7106448524135784f8ce1782fead620c8dcb988613de511",
+      "seq": 3,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "envy_free": true,
+        "labels": [
+          "Adjusted Winner"
+        ],
+        "n_settlements": 1
+      },
+      "hash": "af346b2af5813e9f0db5e3177966e180f04aad9f15e9cf0e843a117f851fa223",
+      "op": "fair_division",
+      "prev_hash": "a52b93b75940dabb09bad3d9e73ea28bf27fd543599efdd349e758044f941883",
+      "seq": 4,
+      "verdict": null
+    }
+  ]
+}

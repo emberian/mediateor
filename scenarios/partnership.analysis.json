@@ -1,0 +1,131 @@
+{
+  "analysis": {
+    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "dissolved": [
+      "The $35000.00-vs-$30000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $30000.00."
+    ],
+    "genuine_conflicts": [],
+    "ledger_findings": [
+      "$14000.00 back if the stain is ordinary wear; $2000.00 back if it counts as damage.",
+      "The verbal figure of $35000.00 in deductions is not what the itemization supports — the itemized deductions total $30000.00."
+    ],
+    "ledger_refund_cents": 1400000,
+    "settlements": [
+      {
+        "allocations": [
+          [
+            "dev_laptop",
+            "jordan"
+          ],
+          [
+            "brand_assets",
+            "priya"
+          ],
+          [
+            "domain_portfolio",
+            "priya"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": true,
+        "explanation": "Adjusted Winner settlement:\n  Development laptop (company-purchased) → jordan (whole item)\n  Brand identity and design files → priya (whole item)\n  Company domain portfolio → priya (whole item)\n  Office furniture and standing desk → split: 33.3% to priya, 66.7% to jordan\nFinal point totals: priya = 70.0000, jordan = 70.0000\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
+        "label": "Adjusted Winner",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "priya",
+            70.0
+          ],
+          [
+            "jordan",
+            70.0
+          ]
+        ],
+        "splits": [
+          [
+            "office_furniture",
+            0.3333333333333333
+          ]
+        ]
+      }
+    ],
+    "shared_core": [
+      "You both stipulate: Clawback applies exactly when departure breached vesting.",
+      "You both agree the shared business checking account was $18000.00 and comes out of the deposit.",
+      "The deposit held is $32000.00."
+    ]
+  },
+  "receipts": [
+    {
+      "detail": {
+        "n_axioms": 1,
+        "n_obligations": 6,
+        "obligations": [
+          "refund_damage_world",
+          "refund_wear_world",
+          "over_claim_refuted",
+          "crux_iff",
+          "crux_is_damage",
+          "crux_is_wear"
+        ],
+        "theory": "Mediator_Probe"
+      },
+      "hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "op": "build_preamble",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "seq": 0,
+      "verdict": null
+    },
+    {
+      "detail": {
+        "damage_world": "Proved",
+        "refund_if_damage_cents": 200000,
+        "refund_if_wear_cents": 1400000,
+        "wear_world": "Proved"
+      },
+      "hash": "fcfd1706565722dc5a487336c5bc0ef36ba4567f692b68c883d9009b71a51558",
+      "op": "verify_ledger",
+      "prev_hash": "051d72dc99ab95bfabc3b243e34f3d09011c5ee21c7a27cb25c0f9985c614265",
+      "seq": 1,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "claimed_total_cents": 3500000,
+        "itemized_total_cents": 3000000,
+        "verdict": "Proved"
+      },
+      "hash": "aab978e8762c079a368c93fb62a3a6e09cd8dd4d8d380b9e17200cb0017250f2",
+      "op": "refute_overclaim",
+      "prev_hash": "fcfd1706565722dc5a487336c5bc0ef36ba4567f692b68c883d9009b71a51558",
+      "seq": 2,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "crux_iff": "Proved",
+        "crux_is_damage": "Unknown",
+        "crux_is_wear": "Unknown"
+      },
+      "hash": "384b6ba13e4f68ea485f6fd9999f55df65a295c2344d2f6764cc8ddbfa82ff55",
+      "op": "isolate_crux",
+      "prev_hash": "aab978e8762c079a368c93fb62a3a6e09cd8dd4d8d380b9e17200cb0017250f2",
+      "seq": 3,
+      "verdict": "Proved"
+    },
+    {
+      "detail": {
+        "envy_free": true,
+        "labels": [
+          "Adjusted Winner"
+        ],
+        "n_settlements": 1
+      },
+      "hash": "730f6483fb76ada23db76831c09df0368a1470ce9de8466753b566fe2b8b240b",
+      "op": "fair_division",
+      "prev_hash": "384b6ba13e4f68ea485f6fd9999f55df65a295c2344d2f6764cc8ddbfa82ff55",
+      "seq": 4,
+      "verdict": null
+    }
+  ]
+}

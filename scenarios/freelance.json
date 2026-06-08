@@ -1,0 +1,79 @@
+{
+  "title": "Freelance website project — Maya (client) and Theo (freelancer)",
+  "parties": [
+    {
+      "id": "maya",
+      "display_name": "Maya (the client)",
+      "signature": [
+        { "name": "work_met_spec", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the delivered website met the agreed specification" }
+      ]
+    },
+    {
+      "id": "theo",
+      "display_name": "Theo (the freelancer)",
+      "signature": [
+        { "name": "client_owes_final_payment", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Maya owes the final invoice amount under the contract" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the total project fee Theo verbally quoted, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "r1", "party": "maya",
+      "nl": "The site was missing half the features we agreed on — it didn't meet the spec.",
+      "formula": { "Not": { "Atom": { "App": ["work_met_spec", []] } } },
+      "english_render": "It is not the case that the delivered work met the agreed specification.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s1", "party": "theo",
+      "nl": "I delivered everything in scope. The work fully met the agreed specification.",
+      "formula": { "Atom": { "App": ["work_met_spec", []] } },
+      "english_render": "The delivered work met the agreed specification.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s2", "party": "theo",
+      "nl": "We agreed the total project fee was five thousand five hundred dollars.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 550000 } ] },
+      "english_render": "Theo's claimed total project fee is $5,500.00.",
+      "weight": 3, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["client_owes_final_payment", []] } },
+        { "Atom": { "App": ["work_met_spec", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 500000,
+    "items": [
+      { "id": "initial_payment", "label": "Initial deposit payment (50%)", "amount_cents": 200000,
+        "asserted_by": "theo", "disputed": false },
+      { "id": "final_invoice", "label": "Final invoice (50% on delivery)", "amount_cents": 300000,
+        "asserted_by": "theo", "disputed": true }
+    ]
+  },
+  "contested_items": [
+    { "id": "domain_hosting", "label": "Domain and hosting accounts (prepaid 1 year)", "divisible": false },
+    { "id": "logo_files", "label": "Logo and brand asset files", "divisible": false },
+    { "id": "source_code", "label": "Website source code repository", "divisible": false },
+    { "id": "design_assets", "label": "Design mockup files and style guide", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "maya", "item": "domain_hosting", "points": 30 },
+    { "party": "maya", "item": "logo_files", "points": 35 },
+    { "party": "maya", "item": "source_code", "points": 25 },
+    { "party": "maya", "item": "design_assets", "points": 10 },
+    { "party": "theo", "item": "domain_hosting", "points": 10 },
+    { "party": "theo", "item": "logo_files", "points": 15 },
+    { "party": "theo", "item": "source_code", "points": 45 },
+    { "party": "theo", "item": "design_assets", "points": 30 }
+  ]
+}

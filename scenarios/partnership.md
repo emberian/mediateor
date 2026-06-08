@@ -1,0 +1,3 @@
+Priya and Jordan co-founded a small software studio together and agreed to a standard one-year equity cliff. Two years in, Jordan left to take a job at a larger company — but the two disagree on whether the departure came before or after the cliff date, which controls whether a 15% clawback on Jordan's vested shares applies.
+
+The kernel certifies the asset split ($18,000 in shared accounts is undisputed; $12,000 clawback is contingent), refutes Jordan's rough "$35,000 total assets" estimate against the itemized $30,000, and isolates the whole money question to one fact: did Jordan's departure breach the vesting agreement? The prover refuses to decide it — that's the one question only a calendar and a contract can answer.

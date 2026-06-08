@@ -1,0 +1,79 @@
+{
+  "title": "Shared apartment separation — Alex and Sam parting ways",
+  "parties": [
+    {
+      "id": "alex",
+      "display_name": "Alex (moving out)",
+      "signature": [
+        { "name": "damage_attributable_to_partner", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the apartment damage is attributable to Alex rather than ordinary wear" }
+      ]
+    },
+    {
+      "id": "sam",
+      "display_name": "Sam (staying in the apartment)",
+      "signature": [
+        { "name": "deposit_deduction_applies", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the landlord's damage deduction is properly charged to Alex's share" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the total deduction from Alex's deposit share Sam verbally stated, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "r1", "party": "alex",
+      "nl": "The wall scuffs were there before I moved in — that's just wear, not damage I caused.",
+      "formula": { "Not": { "Atom": { "App": ["damage_attributable_to_partner", []] } } },
+      "english_render": "It is not the case that the apartment damage is attributable to Alex.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s1", "party": "sam",
+      "nl": "The scuffs and the bathroom tile were in perfect condition when Alex moved in — that's chargeable damage.",
+      "formula": { "Atom": { "App": ["damage_attributable_to_partner", []] } },
+      "english_render": "The apartment damage is attributable to Alex.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s2", "party": "sam",
+      "nl": "The total damage deduction on Alex's share comes to about four hundred dollars.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 40000 } ] },
+      "english_render": "Sam's stated total damage deduction is $400.00.",
+      "weight": 3, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["deposit_deduction_applies", []] } },
+        { "Atom": { "App": ["damage_attributable_to_partner", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 150000,
+    "items": [
+      { "id": "professional_cleaning", "label": "Professional move-out cleaning (shared)", "amount_cents": 10000,
+        "asserted_by": "sam", "disputed": false },
+      { "id": "damage_repair", "label": "Wall and tile repair (disputed damage)", "amount_cents": 25000,
+        "asserted_by": "sam", "disputed": true }
+    ]
+  },
+  "contested_items": [
+    { "id": "the_cat", "label": "Shared cat (Mochi)", "divisible": false },
+    { "id": "living_room_rug", "label": "Living room rug", "divisible": false },
+    { "id": "kitchen_appliances", "label": "Small kitchen appliances", "divisible": false },
+    { "id": "bookshelf", "label": "Bookshelf and books", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "alex", "item": "the_cat", "points": 55 },
+    { "party": "alex", "item": "living_room_rug", "points": 10 },
+    { "party": "alex", "item": "kitchen_appliances", "points": 20 },
+    { "party": "alex", "item": "bookshelf", "points": 15 },
+    { "party": "sam", "item": "the_cat", "points": 45 },
+    { "party": "sam", "item": "living_room_rug", "points": 20 },
+    { "party": "sam", "item": "kitchen_appliances", "points": 20 },
+    { "party": "sam", "item": "bookshelf", "points": 15 }
+  ]
+}

@@ -722,6 +722,10 @@ name = "mediator-demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mediator-core",
+ "mediator-fairdiv",
+ "mediator-prover",
+ "mediator-tui",
  "mediator-types",
  "serde_json",
 ]
@@ -738,6 +742,7 @@ name = "mediator-llm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mediator-core",
  "mediator-types",
  "serde",
  "serde_json",
@@ -759,6 +764,8 @@ dependencies = [
  "crossterm",
  "mediator-types",
  "ratatui",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -776,6 +783,9 @@ dependencies = [
  "anyhow",
  "axum",
  "maud",
+ "mediator-core",
+ "mediator-fairdiv",
+ "mediator-prover",
  "mediator-types",
  "serde",
  "serde_json",

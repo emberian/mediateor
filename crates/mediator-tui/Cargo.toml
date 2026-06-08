@@ -8,3 +8,7 @@ license.workspace = true
 mediator-types = { workspace = true }
 ratatui = "0.28"
 crossterm = "0.28"
+
+[dev-dependencies]
+sha2 = { workspace = true }
+serde_json = { workspace = true }
