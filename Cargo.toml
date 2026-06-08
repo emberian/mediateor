@@ -8,6 +8,7 @@ members = [
     "crates/mediator-llm",
     "crates/mediator-tui",
     "crates/mediator-web",
+    "crates/mediator-session",
     "crates/mediator-demo",
 ]
 
@@ -22,6 +23,7 @@ mediator-fairdiv = { path = "crates/mediator-fairdiv" }
 mediator-core = { path = "crates/mediator-core" }
 mediator-llm = { path = "crates/mediator-llm" }
 mediator-tui = { path = "crates/mediator-tui" }
+mediator-session = { path = "crates/mediator-session" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
