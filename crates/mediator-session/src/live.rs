@@ -136,6 +136,27 @@ impl MediatorBrain for LiveBrain {
         self.ask(&user).unwrap_or_else(|| self.fallback.shared_ground(s))
     }
 
+    fn acknowledge_evidence(&self, s: &Session) -> String {
+        if !s.has_evidence() {
+            return self.fallback.acknowledge_evidence(s);
+        }
+        let mut items = String::new();
+        for th in &s.parties {
+            for ev in &th.evidence {
+                items.push_str(&format!("- {} — {}\n", th.display_name, ev.render()));
+            }
+        }
+        let user = format!(
+            "Each person has put some evidence on the record. Acknowledge it warmly so \
+             they feel heard on it, and be explicit that while you take all of it in, \
+             none of it decides the open question for them — that stays theirs to \
+             answer. Do not weigh it toward one side or rule on the disagreement. A few \
+             sentences. The evidence:\n{items}",
+        );
+        self.ask(&user)
+            .unwrap_or_else(|| self.fallback.acknowledge_evidence(s))
+    }
+
     fn crux(&self, s: &Session) -> String {
         let Some(crux) = &s.analysis.crux else {
             return self.fallback.crux(s);

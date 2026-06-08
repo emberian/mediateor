@@ -16,7 +16,8 @@ pub mod render;
 pub mod receipts;
 
 use mediator_types::{
-    Analysis, Conflict, Dispute, FairDivider, Formula, PartyId, Prover, Receipt, Term, Verdict,
+    Analysis, Claim, Conflict, Dispute, FairDivider, Formula, PartyId, Prover, Receipt, Sig, Term,
+    Verdict,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -92,6 +93,32 @@ pub fn analyze(
         "The amount at stake is {}.",
         money(dispute.ledger.deposit_cents)
     ));
+
+    // ── dissolution: the categorical layer, live ────────────────────────
+    // Before any clash is handed back as a genuine crux, ask the ontology
+    // whether it is really two words for the same thing. Vocabulary mismatches
+    // are dissolved here (with a plain-language note) and suppressed from the
+    // genuine-conflict set below. This runs offline and deterministically.
+    let dissolved_clashes = dissolve_vocabulary_clashes(dispute);
+    let mut suppressed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for dc in &dissolved_clashes {
+        suppressed.insert(dc.predicates.0.clone());
+        suppressed.insert(dc.predicates.1.clone());
+        analysis.dissolved.push(dc.note.clone());
+    }
+    if !dissolved_clashes.is_empty() {
+        chain.append(
+            "dissolve_vocabulary",
+            json!({
+                "n_dissolved": dissolved_clashes.len(),
+                "aligned_pairs": dissolved_clashes
+                    .iter()
+                    .map(|d| [&d.predicates.0, &d.predicates.1])
+                    .collect::<Vec<_>>(),
+            }),
+            None,
+        );
+    }
 
     // ── 2. verify_ledger ────────────────────────────────────────────────
     let damage_v = v("refund_damage_world");
@@ -261,9 +288,12 @@ pub fn analyze(
                 question,
                 verdict: Verdict::Unknown,
             });
-            // Each genuinely-open crux is also an irreducible inter-party knot.
-            if let Some(conflict) = predicate_conflict(dispute, &b.predicate, gloss.as_deref()) {
-                analysis.genuine_conflicts.push(conflict);
+            // Each genuinely-open crux is also an irreducible inter-party knot —
+            // unless the ontology already dissolved it as a vocabulary gap.
+            if !suppressed.contains(&b.predicate) {
+                if let Some(conflict) = predicate_conflict(dispute, &b.predicate, gloss.as_deref()) {
+                    analysis.genuine_conflicts.push(conflict);
+                }
             }
         } else if proved(&holds_v) || proved(&fails_v) {
             // The host actually settled this one — record it as a *decided*
@@ -334,7 +364,16 @@ pub fn analyze(
     // still surface the legacy crux conflict if one exists.
     if bridges.is_empty() {
         if let Some(conflict) = crux_conflict(dispute) {
-            analysis.genuine_conflicts.push(conflict);
+            // Suppress if the ontology already dissolved this clash's predicate.
+            let dissolved_here = conflict
+                .claim_ids
+                .iter()
+                .filter_map(|id| dispute.claims.iter().find(|c| &c.id == id))
+                .filter_map(claim_atom_polarity)
+                .any(|(name, _)| suppressed.contains(name));
+            if !dissolved_here {
+                analysis.genuine_conflicts.push(conflict);
+            }
         }
     }
 
@@ -528,6 +567,125 @@ fn predicate_conflict(dispute: &Dispute, pred: &str, gloss: Option<&str>) -> Opt
         }
         _ => None,
     }
+}
+
+// ─────────────────────── vocabulary-mismatch dissolution ───────────────────────
+// The categorical layer, made live: before we hand a clash back as a *genuine*
+// crux, we ask the ontology whether the two parties are really disagreeing — or
+// just using two words for the same thing. A clash whose two sides are
+// *different predicate names* the ontology bridges as synonyms is not a crux at
+// all; it is a vocabulary gap, dissolved with a plain-language note. Same-named
+// clashes (every seeded scenario) are structurally genuine and never reach here.
+
+/// The bare nullary predicate a claim asserts, with its polarity.
+/// `Some((name, true))` for `P`, `Some((name, false))` for `¬P`, else `None`.
+fn claim_atom_polarity(c: &Claim) -> Option<(&str, bool)> {
+    match &c.formula {
+        Formula::Atom(Term::App(n, a)) if a.is_empty() => Some((n.as_str(), true)),
+        Formula::Not(inner) => {
+            if let Formula::Atom(Term::App(n, a)) = &**inner {
+                if a.is_empty() {
+                    return Some((n.as_str(), false));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// A party's declared signature symbols.
+fn party_signature<'a>(dispute: &'a Dispute, party: &str) -> &'a [Sig] {
+    dispute
+        .parties
+        .iter()
+        .find(|p| p.id == party)
+        .map(|p| p.signature.as_slice())
+        .unwrap_or(&[])
+}
+
+/// One dissolved vocabulary clash: the two synonym predicates and the note.
+struct DissolvedClash {
+    /// The predicate names that were aligned away (so the caller suppresses any
+    /// genuine conflict over either of them).
+    predicates: (String, String),
+    note: String,
+}
+
+/// Find clashes that are *only* a vocabulary gap and dissolve them.
+///
+/// For every pair of active claims from *different* parties that take *opposing*
+/// polarity over *different* predicate names, ask
+/// `mediator_ontology::classify_clash_sigs`. If it returns `VocabularyMismatch`
+/// (with an alignment), the apparent disagreement is two words for the same
+/// concept — recorded as dissolved, never a genuine crux. A `Genuine` verdict (or
+/// any same-named clash, which never reaches here) is left untouched.
+fn dissolve_vocabulary_clashes(dispute: &Dispute) -> Vec<DissolvedClash> {
+    let active: Vec<&Claim> = dispute.claims.iter().filter(|c| c.active).collect();
+    let mut out: Vec<DissolvedClash> = Vec::new();
+    let mut seen: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+
+    for (i, ca) in active.iter().enumerate() {
+        let Some((pa, pol_a)) = claim_atom_polarity(ca) else {
+            continue;
+        };
+        for cb in active.iter().skip(i + 1) {
+            // Different parties only — one person using two words for one thing
+            // is not an inter-party clash to dissolve.
+            if ca.party == cb.party {
+                continue;
+            }
+            let Some((pb, pol_b)) = claim_atom_polarity(cb) else {
+                continue;
+            };
+            // Opposing polarity over *different* names is the dissolution shape.
+            // Same-named opposing claims are the genuine-crux path (handled
+            // elsewhere); same-polarity pairs are not a clash at all.
+            if pol_a == pol_b || pa == pb {
+                continue;
+            }
+
+            // De-dup symmetric pairs (claim order shouldn't matter).
+            let key = if pa <= pb {
+                (pa.to_string(), pb.to_string())
+            } else {
+                (pb.to_string(), pa.to_string())
+            };
+            if seen.contains(&key) {
+                continue;
+            }
+
+            let sig_a = party_signature(dispute, &ca.party);
+            let sig_b = party_signature(dispute, &cb.party);
+            let verdict = mediator_ontology::classify_clash_sigs(sig_a, sig_b, pa, pb);
+
+            if verdict.is_vocabulary() {
+                seen.insert(key);
+                let aligned = verdict
+                    .alignment
+                    .as_ref()
+                    .map(|al| al.merged_name.clone())
+                    .unwrap_or_else(|| pa.to_string());
+                // Prefer human glosses when present; fall back to the symbol name.
+                let gloss_a = predicate_gloss(dispute, pa).unwrap_or_else(|| pa.replace('_', " "));
+                let gloss_b = predicate_gloss(dispute, pb).unwrap_or_else(|| pb.replace('_', " "));
+                let note = format!(
+                    "'{}' and '{}' are the same thing — not a disagreement, a vocabulary gap. \
+                     ({} ≈ {}, aligned as '{}'.)",
+                    pa.replace('_', " "),
+                    pb.replace('_', " "),
+                    gloss_a,
+                    gloss_b,
+                    aligned
+                );
+                out.push(DissolvedClash {
+                    predicates: (pa.to_string(), pb.to_string()),
+                    note,
+                });
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -822,5 +980,127 @@ mod tests {
         assert_eq!(controlled.len(), 2);
         assert!(controlled.contains(&"kitchen_work_defective"));
         assert!(controlled.contains(&"change_order_authorized"));
+    }
+
+    // ─────────────────── vocabulary-mismatch dissolution ───────────────────
+
+    use mediator_types::{Ledger, Party, Sort};
+
+    fn bool_pred(name: &str, gloss: &str) -> Sig {
+        Sig { name: name.into(), arg_sorts: vec![], ret: Sort::Bool, gloss: gloss.into() }
+    }
+
+    fn atom_claim(id: &str, party: &str, pred: &str, positive: bool) -> Claim {
+        let atom = Formula::Atom(Term::App(pred.into(), vec![]));
+        let formula = if positive { atom } else { Formula::Not(Box::new(atom)) };
+        Claim {
+            id: id.into(),
+            party: party.into(),
+            nl: format!("{party} on {pred}"),
+            formula,
+            english_render: String::new(),
+            weight: 5,
+            defeasible: false,
+            active: true,
+        }
+    }
+
+    /// A synthetic dispute whose two opposing claims use SYNONYM predicates —
+    /// different names, near-identical glosses ("carpet repair" vs "stain
+    /// remediation"). The ontology must recognize the clash as a vocabulary gap
+    /// and the kernel must dissolve it, never emit it as a genuine conflict.
+    fn synonym_dispute() -> Dispute {
+        Dispute {
+            title: "Carpet wording dispute".into(),
+            parties: vec![
+                Party {
+                    id: "ada".into(),
+                    display_name: "Ada".into(),
+                    signature: vec![bool_pred(
+                        "carpet_needs_repair",
+                        "the carpet requires professional repair work to fix the stain",
+                    )],
+                },
+                Party {
+                    id: "ben".into(),
+                    display_name: "Ben".into(),
+                    signature: vec![bool_pred(
+                        "stain_remediation_required",
+                        "the carpet stain requires professional remediation work performed",
+                    )],
+                },
+            ],
+            // Ada asserts the carpet needs repair; Ben *denies* stain remediation
+            // is required. Different words, opposing polarity — looks like a fight,
+            // is a vocabulary gap.
+            claims: vec![
+                atom_claim("a1", "ada", "carpet_needs_repair", true),
+                atom_claim("b1", "ben", "stain_remediation_required", false),
+            ],
+            stipulated: vec![],
+            ledger: Ledger { deposit_cents: 100000, items: vec![] },
+            contested_items: vec![],
+            valuations: vec![],
+        }
+    }
+
+    #[test]
+    fn synonym_clash_is_dissolved_not_a_genuine_conflict() {
+        let d = synonym_dispute();
+        // Ledger worlds prove (empty deductions), nothing else asserted.
+        let mut verdicts = HashMap::new();
+        verdicts.insert("refund_damage_world".to_string(), Verdict::Proved);
+        verdicts.insert("refund_wear_world".to_string(), Verdict::Proved);
+        let prover = TestProver { verdicts };
+        let (a, receipts) = analyze(&d, &prover, &TestDivider);
+
+        // The clash lands in `dissolved`, naming both words and the alignment.
+        assert!(
+            a.dissolved.iter().any(|s| s.contains("carpet needs repair")
+                && s.contains("stain remediation required")
+                && s.contains("vocabulary gap")),
+            "expected a vocabulary-gap note, got {:?}",
+            a.dissolved
+        );
+
+        // It is NOT a genuine conflict (the whole point of dissolution).
+        assert!(
+            a.genuine_conflicts.is_empty(),
+            "a synonym clash must not be a genuine conflict, got {:?}",
+            a.genuine_conflicts
+        );
+        // And it is not handed back as an open crux either.
+        assert!(a.cruxes.iter().all(|c| c.predicate != "carpet_needs_repair"
+            && c.predicate != "stain_remediation_required"));
+
+        // A `dissolve_vocabulary` receipt records the aligned pair, chain intact.
+        assert!(receipts::verify_chain(&receipts).is_ok());
+        let diss = receipts
+            .iter()
+            .find(|r| r.op == "dissolve_vocabulary")
+            .expect("a dissolve_vocabulary receipt should be emitted");
+        assert_eq!(diss.detail["n_dissolved"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn same_predicate_clash_stays_genuine_not_dissolved() {
+        // Guard: when both parties use the SAME predicate name (the seeded shape),
+        // dissolution must do nothing — it is a structural genuine disagreement.
+        let mut d = synonym_dispute();
+        // Make Ben speak Ada's exact predicate, opposing polarity.
+        d.parties[1].signature = vec![bool_pred(
+            "carpet_needs_repair",
+            "the carpet requires professional repair work to fix the stain",
+        )];
+        d.claims[1] = atom_claim("b1", "ben", "carpet_needs_repair", false);
+
+        let mut verdicts = HashMap::new();
+        verdicts.insert("refund_damage_world".to_string(), Verdict::Proved);
+        verdicts.insert("refund_wear_world".to_string(), Verdict::Proved);
+        let prover = TestProver { verdicts };
+        let (a, _) = analyze(&d, &prover, &TestDivider);
+
+        // No vocabulary-gap dissolution for a same-name clash.
+        assert!(!a.dissolved.iter().any(|s| s.contains("vocabulary gap")));
     }
 }

@@ -1,5 +1,12 @@
 # we hate each other but not that badly ☄️
 
+live demo online: <https://mediateor.fg-goose.online>. 
+
+```
+if you appreciate the demo please consider venmo @ember_arlynx
+for the token fund (i dropped in $50 of seed funding myself..)
+```
+
 *A peace technology. An impartial, patient, **disinterested** guide that helps two
 people resolve a disagreement they'd both rather not let escalate — and is
 trustworthy enough to use with no one in the robe, because the few things that

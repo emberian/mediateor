@@ -66,6 +66,60 @@ impl Utterance {
     }
 }
 
+/// What a piece of evidence *is*. The mediator weighs all three to inform the
+/// humans, but the kind matters for how it's framed: a `Statement` is one
+/// party's account, a `Fact` is a concrete claimed fact, an `Artifact` points at
+/// something outside the conversation (a photo, a receipt, a lease clause).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EvidenceKind {
+    /// A party's narrative account of what happened (their side, in their words).
+    Statement,
+    /// A concrete factual assertion the party is putting on the record.
+    Fact,
+    /// A reference to something outside the conversation — a label plus an
+    /// optional note/url in [`Evidence::note`] (e.g. a photo, a receipt).
+    Artifact,
+}
+
+/// A piece of evidence a party attaches to their thread. The mediator may
+/// **acknowledge and weigh** evidence in its reflection — but it NEVER uses
+/// evidence to *decide the crux*. Evidence informs the humans; it does not let
+/// the machine rule. (The crux stays `Unknown`, handed back, always.)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Evidence {
+    pub kind: EvidenceKind,
+    /// The label/account/claim text the party submitted.
+    pub text: String,
+    /// Whose evidence this is.
+    pub by: PartyId,
+    /// Optional supporting note or URL (used especially by [`EvidenceKind::Artifact`]).
+    pub note: Option<String>,
+}
+
+impl Evidence {
+    pub fn statement(by: &str, text: impl Into<String>) -> Self {
+        Self { kind: EvidenceKind::Statement, text: text.into(), by: by.to_string(), note: None }
+    }
+    pub fn fact(by: &str, text: impl Into<String>) -> Self {
+        Self { kind: EvidenceKind::Fact, text: text.into(), by: by.to_string(), note: None }
+    }
+    pub fn artifact(by: &str, label: impl Into<String>, note: Option<String>) -> Self {
+        Self { kind: EvidenceKind::Artifact, text: label.into(), by: by.to_string(), note }
+    }
+    /// A one-line human framing of this piece of evidence (for acknowledgement).
+    pub fn render(&self) -> String {
+        let head = match self.kind {
+            EvidenceKind::Statement => "account",
+            EvidenceKind::Fact => "stated fact",
+            EvidenceKind::Artifact => "exhibit",
+        };
+        match &self.note {
+            Some(n) if !n.is_empty() => format!("{head}: {} ({n})", self.text),
+            _ => format!("{head}: {}", self.text),
+        }
+    }
+}
+
 /// One party's private thread + what the mediator has learned from them.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartyThread {
@@ -75,6 +129,10 @@ pub struct PartyThread {
     pub caucus: Vec<Utterance>,
     /// The *interests under the positions* the mediator surfaced.
     pub interests: Vec<String>,
+    /// Evidence this party submitted, attached to their thread. Stored, weighed,
+    /// acknowledged — but never load-bearing on the crux.
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
 }
 
 /// A settlement option on the table.
@@ -107,6 +165,15 @@ pub struct Session {
     pub proposals: Vec<Proposal>,
     /// A human-readable log of phase transitions and decisions.
     pub events: Vec<String>,
+    /// Whether the mediator has *acknowledged the evidence on the record* since
+    /// the last submission. Reset to `false` whenever new evidence arrives, so a
+    /// late exhibit re-opens the acknowledgement step (the flow revisits).
+    #[serde(default)]
+    pub evidence_acknowledged: bool,
+    /// Whether the mediator has named the crux yet (drives the adaptive flow;
+    /// independent of `phase`, which the batch driver marches through).
+    #[serde(default)]
+    pub crux_named: bool,
 }
 
 #[derive(Deserialize)]
@@ -150,6 +217,7 @@ impl Session {
                 display_name: p.display_name.clone(),
                 caucus: Vec::new(),
                 interests: Vec::new(),
+                evidence: Vec::new(),
             })
             .collect();
         let id = slug(&dispute.title);
@@ -164,6 +232,8 @@ impl Session {
             joint_transcript: Vec::new(),
             proposals: Vec::new(),
             events: Vec::new(),
+            evidence_acknowledged: false,
+            crux_named: false,
         }
     }
 
@@ -189,6 +259,84 @@ impl Session {
              you talk to starts oriented, not from scratch."
         )));
         self.events.push(format!("escalated:{reason}"));
+    }
+
+    /// A party submits evidence attached to their thread. Stored on the party's
+    /// `PartyThread`; logged as an event; and the acknowledgement step is
+    /// re-opened so the mediator weighs the new exhibit (the flow revisits,
+    /// it doesn't silently absorb it). Returns `Err` if `by` is not a party.
+    pub fn submit_evidence(&mut self, ev: Evidence) -> anyhow::Result<()> {
+        let by = ev.by.clone();
+        let th = self
+            .parties
+            .iter_mut()
+            .find(|t| t.id == by)
+            .ok_or_else(|| anyhow::anyhow!("no such party: {by}"))?;
+        let render = ev.render();
+        th.evidence.push(ev);
+        self.evidence_acknowledged = false;
+        self.events.push(format!("evidence:{by}:{render}"));
+        Ok(())
+    }
+
+    /// All evidence across every party thread, in submission order per party.
+    pub fn all_evidence(&self) -> Vec<&Evidence> {
+        self.parties.iter().flat_map(|t| t.evidence.iter()).collect()
+    }
+
+    /// Evidence submitted by one party.
+    pub fn evidence_by(&self, party: &str) -> Vec<&Evidence> {
+        self.parties
+            .iter()
+            .find(|t| t.id == party)
+            .map(|t| t.evidence.iter().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn has_evidence(&self) -> bool {
+        self.parties.iter().any(|t| !t.evidence.is_empty())
+    }
+
+    /// True once a party has had any caucus exchange (the mediator heard them).
+    pub fn has_spoken(&self, party: &str) -> bool {
+        self.parties
+            .iter()
+            .find(|t| t.id == party)
+            .map(|t| !t.caucus.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// True once *every* party has been heard at least once.
+    pub fn everyone_spoken(&self) -> bool {
+        !self.parties.is_empty() && self.parties.iter().all(|t| !t.caucus.is_empty())
+    }
+
+    /// A party who has not yet spoken, if any (intake order).
+    pub fn next_unheard(&self) -> Option<PartyId> {
+        self.parties
+            .iter()
+            .find(|t| t.caucus.is_empty())
+            .map(|t| t.id.clone())
+    }
+
+    /// Whether the certified analysis carries shareable common ground.
+    pub fn has_shared_ground(&self) -> bool {
+        !self.analysis.shared_core.is_empty()
+    }
+
+    /// Whether there is a crux to name (certified open question).
+    pub fn has_crux(&self) -> bool {
+        self.analysis.crux.is_some() || !self.analysis.cruxes.is_empty()
+    }
+
+    /// Whether any proposal is on the table.
+    pub fn has_proposals(&self) -> bool {
+        !self.proposals.is_empty()
+    }
+
+    /// Whether some party has accepted a proposal (the convergence signal).
+    pub fn someone_accepted(&self) -> bool {
+        self.proposals.iter().any(|p| !p.accepted_by.is_empty())
     }
 }
 
@@ -233,6 +381,13 @@ pub trait MediatorBrain {
     fn proposals(&self, s: &Session) -> Vec<ProposalDraft>;
     fn present_proposals(&self, s: &Session) -> String;
     fn closing(&self, s: &Session, accepted: &Proposal) -> String;
+    /// Acknowledge and weigh the evidence on record. Defaults to the pure
+    /// [`acknowledge_evidence`] helper (deterministic, offline); a live brain may
+    /// override for a warmer voice but must keep the same discipline: weigh it,
+    /// never let it decide the crux.
+    fn acknowledge_evidence(&self, s: &Session) -> String {
+        acknowledge_evidence(s)
+    }
 }
 
 // ───────────────────────────── the driver ────────────────────────────────
@@ -281,6 +436,14 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
     }
     s.events.push("caucus".into());
 
+    // ── Acknowledge evidence, if any party put some on the record ──
+    if s.has_evidence() {
+        let ack = brain.acknowledge_evidence(&s);
+        s.joint_transcript.push(Utterance::mediator(ack));
+        s.evidence_acknowledged = true;
+        s.events.push("acknowledge_evidence".into());
+    }
+
     // ── Shared Ground (certified) ──
     s.phase = Phase::SharedGround;
     let sg = brain.shared_ground(&s);
@@ -291,6 +454,7 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
     s.phase = Phase::Crux;
     let cx = brain.crux(&s);
     s.joint_transcript.push(Utterance::mediator(cx));
+    s.crux_named = true;
     s.events.push("crux".into());
 
     // ── Proposals (only certified-coherent ones reach the parties) ──
@@ -332,6 +496,137 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
     }
 
     s
+}
+
+// ─────────────────────── the adaptive (non-linear) flow ──────────────────────
+
+/// One move the mediator can make. The interactive driver (web/TUI) asks
+/// [`next_action`] what to do next and performs exactly that move, so the flow
+/// can **loop, branch, revisit, and isn't forced through a fixed order** — a
+/// late exhibit re-opens acknowledgement; an unheard party is always returned to
+/// before the joint work; the crux is never reached before both are heard.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediatorAction {
+    /// Open the session (nothing said yet).
+    Welcome,
+    /// Caucus privately with this party (chosen because they've not been heard).
+    AskParty(PartyId),
+    /// Weigh and acknowledge evidence that's been submitted but not yet folded
+    /// in (informs the humans; never decides the crux).
+    AcknowledgeEvidence,
+    /// Reflect the certified common ground back to both.
+    ReflectSharedGround,
+    /// Name the genuine knot and hand it back (never decide it).
+    NameCrux,
+    /// Put certified-coherent settlement options on the table.
+    ProposeOptions,
+    /// Invite the parties to accept / counter / hold.
+    InviteAgreement,
+    /// Hand off to a human with the full record (the always-available backstop).
+    Escalate,
+    /// Nothing left to do — the session has landed (or been escalated).
+    Close,
+}
+
+/// Choose the mediator's next move from the *state of the session*, not from a
+/// fixed script. This is the seam the interactive driver loops on:
+///
+/// ```text
+///   loop { match next_action(&s) { Close => break, a => perform(a, &mut s) } }
+/// ```
+///
+/// The ordering encodes a real mediator's priorities, but every gate is a state
+/// check, so the flow naturally **revisits**: submit late evidence and
+/// `AcknowledgeEvidence` comes back; a party who hasn't spoken is always pulled
+/// in before any joint work. The crux is gated behind *everyone heard* — the
+/// machine never races to the knot before the people are heard.
+pub fn next_action(s: &Session) -> MediatorAction {
+    // Escalation is terminal.
+    if s.phase == Phase::Escalated {
+        return MediatorAction::Close;
+    }
+
+    // 0. Open if nothing has happened at all.
+    let opened = s.joint_transcript.iter().any(|u| matches!(u.speaker, Speaker::Mediator))
+        || s.parties.iter().any(|t| !t.caucus.is_empty());
+    if !opened {
+        return MediatorAction::Welcome;
+    }
+
+    // 1. Hear everyone privately first. Always return to an unheard party
+    //    before doing any joint work — caucus is the foundation.
+    if let Some(p) = s.next_unheard() {
+        return MediatorAction::AskParty(p);
+    }
+
+    // 2. Weigh any evidence that's come in but hasn't been acknowledged on the
+    //    record yet. Submitting a late exhibit re-opens this (revisit), because
+    //    `submit_evidence` clears `evidence_acknowledged`.
+    if s.has_evidence() && !s.evidence_acknowledged {
+        return MediatorAction::AcknowledgeEvidence;
+    }
+
+    // 3. With everyone heard and evidence weighed, reflect shared ground (once).
+    let reflected_ground =
+        s.events.iter().any(|e| e == "shared_ground") || !s.has_shared_ground();
+    if !reflected_ground {
+        return MediatorAction::ReflectSharedGround;
+    }
+
+    // 4. Name the genuine knot (once), only after shared ground — and only if
+    //    there is one. No crux ⇒ skip straight to options.
+    if s.has_crux() && !s.crux_named {
+        return MediatorAction::NameCrux;
+    }
+
+    // 5. Put coherent options on the table if none are there yet.
+    if !s.has_proposals() {
+        return MediatorAction::ProposeOptions;
+    }
+
+    // 6. Invite agreement until someone accepts.
+    if !s.someone_accepted() {
+        return MediatorAction::InviteAgreement;
+    }
+
+    // 7. Landed.
+    MediatorAction::Close
+}
+
+/// Fold the evidence on record into a single plain acknowledgement the mediator
+/// can speak. **Pure** (no model, no network) so it's the deterministic floor a
+/// live brain can surpass — and so it can be tested offline.
+///
+/// It *acknowledges and weighs* (names whose exhibit it is, and what kind) but
+/// is explicit that none of it decides the open question — evidence informs the
+/// humans; it does not let the machine rule. The crux stays theirs.
+pub fn acknowledge_evidence(s: &Session) -> String {
+    let all = s.all_evidence();
+    if all.is_empty() {
+        return "No one's put anything on the record yet — and that's fine; your \
+                accounts are evidence enough to work with."
+            .to_string();
+    }
+    let mut out = String::from(
+        "I want to make sure what each of you brought is on the record and that \
+         you've been heard on it:\n",
+    );
+    for th in &s.parties {
+        if th.evidence.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("  {}:\n", first_name(&th.display_name)));
+        for ev in &th.evidence {
+            out.push_str(&format!("    • {}\n", ev.render()));
+        }
+    }
+    out.push_str(
+        "\nI've taken all of it in, and it matters — it tells me where each of you \
+         is coming from. What it does NOT do is settle the one open question for \
+         you: that stays yours to answer, not something this evidence (or I) get to \
+         decide.",
+    );
+    out.trim_end().to_string()
 }
 
 /// Render the whole session as a readable transcript (caucuses + joint).
@@ -644,5 +939,161 @@ mod tests {
         s.escalate("a party asked for a human");
         assert_eq!(s.phase, Phase::Escalated);
         assert!(s.events.iter().any(|e| e.starts_with("escalated")));
+    }
+
+    #[test]
+    fn evidence_is_stored_and_surfaced() {
+        let mut s = roommate_session();
+        assert!(!s.has_evidence());
+
+        s.submit_evidence(Evidence::statement(
+            "robin",
+            "I lived there two years and the carpet was already worn when I moved in.",
+        ))
+        .unwrap();
+        s.submit_evidence(Evidence::artifact(
+            "sam",
+            "photo of the stain",
+            Some("https://example/stain.jpg".into()),
+        ))
+        .unwrap();
+        s.submit_evidence(Evidence::fact("sam", "The stain is 30cm across."))
+            .unwrap();
+
+        // stored on the right threads
+        assert_eq!(s.evidence_by("robin").len(), 1);
+        assert_eq!(s.evidence_by("sam").len(), 2);
+        assert_eq!(s.all_evidence().len(), 3);
+        assert!(s.has_evidence());
+        // submitting re-opens acknowledgement
+        assert!(!s.evidence_acknowledged);
+        // logged
+        assert!(s.events.iter().filter(|e| e.starts_with("evidence:")).count() == 3);
+
+        // surfaced in the acknowledgement, with the artifact note
+        let ack = acknowledge_evidence(&s);
+        assert!(ack.contains("photo of the stain"));
+        assert!(ack.contains("https://example/stain.jpg"));
+        assert!(ack.contains("30cm"));
+        // and the discipline is explicit: evidence does not decide the crux
+        let low = ack.to_lowercase();
+        assert!(low.contains("not") && (low.contains("decide") || low.contains("settle")));
+    }
+
+    #[test]
+    fn submit_evidence_rejects_unknown_party() {
+        let mut s = roommate_session();
+        assert!(s.submit_evidence(Evidence::fact("nobody", "x")).is_err());
+    }
+
+    #[test]
+    fn next_action_follows_state_not_a_fixed_script() {
+        let mut s = roommate_session();
+        // fresh: open the session
+        assert_eq!(next_action(&s), MediatorAction::Welcome);
+
+        // once opened, an unheard party is pulled in before any joint work
+        s.joint_transcript.push(Utterance::mediator("hello"));
+        match next_action(&s) {
+            MediatorAction::AskParty(_) => {}
+            other => panic!("expected AskParty before anyone spoke, got {other:?}"),
+        }
+
+        // hear the first party — the *other* unheard party is still next
+        let ids = s.party_ids();
+        if let Some(th) = s.parties.iter_mut().find(|t| t.id == ids[0]) {
+            th.caucus.push(Utterance::party(&ids[0], "my side"));
+        }
+        assert_eq!(next_action(&s), MediatorAction::AskParty(ids[1].clone()));
+
+        // both heard now
+        if let Some(th) = s.parties.iter_mut().find(|t| t.id == ids[1]) {
+            th.caucus.push(Utterance::party(&ids[1], "my side too"));
+        }
+        assert!(s.everyone_spoken());
+
+        // with evidence in but unacknowledged, that's the next move
+        s.submit_evidence(Evidence::fact(&ids[0], "a fact")).unwrap();
+        assert_eq!(next_action(&s), MediatorAction::AcknowledgeEvidence);
+
+        // acknowledge it → now reflect shared ground (roommate has certified ground)
+        s.evidence_acknowledged = true;
+        assert!(s.has_shared_ground());
+        assert_eq!(next_action(&s), MediatorAction::ReflectSharedGround);
+
+        // reflected → name the crux (roommate has one)
+        s.events.push("shared_ground".into());
+        assert!(s.has_crux());
+        assert_eq!(next_action(&s), MediatorAction::NameCrux);
+
+        // crux named → propose options
+        s.crux_named = true;
+        assert_eq!(next_action(&s), MediatorAction::ProposeOptions);
+
+        // a coherent proposal exists → invite agreement
+        s.proposals.push(Proposal {
+            id: "p1".into(),
+            summary: "split".into(),
+            settlement: None,
+            coherent: true,
+            accepted_by: Vec::new(),
+        });
+        assert_eq!(next_action(&s), MediatorAction::InviteAgreement);
+
+        // someone accepts → close
+        s.proposals[0].accepted_by = vec![ids[0].clone()];
+        assert_eq!(next_action(&s), MediatorAction::Close);
+    }
+
+    #[test]
+    fn late_evidence_reopens_acknowledgement() {
+        // The flow is NOT a one-way march: a late exhibit revisits the ack step.
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        for id in &ids {
+            if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
+                th.caucus.push(Utterance::party(id, "heard"));
+            }
+        }
+        s.events.push("shared_ground".into());
+        s.crux_named = true;
+        s.proposals.push(Proposal {
+            id: "p1".into(),
+            summary: "split".into(),
+            settlement: None,
+            coherent: true,
+            accepted_by: vec![ids[0].clone()],
+        });
+        // we're at Close…
+        assert_eq!(next_action(&s), MediatorAction::Close);
+        // …but a late exhibit drops us back to acknowledgement
+        s.submit_evidence(Evidence::artifact(&ids[1], "receipt", None)).unwrap();
+        assert_eq!(next_action(&s), MediatorAction::AcknowledgeEvidence);
+    }
+
+    #[test]
+    fn escalated_session_closes() {
+        let mut s = roommate_session();
+        s.escalate("asked for a human");
+        assert_eq!(next_action(&s), MediatorAction::Close);
+    }
+
+    #[test]
+    fn conduct_acknowledges_submitted_evidence() {
+        let mut s = roommate_session();
+        s.submit_evidence(Evidence::artifact(
+            "sam",
+            "photo of the stain",
+            Some("note: corner of the room".into()),
+        ))
+        .unwrap();
+        let inputs = ScriptedInputs::new()
+            .with("robin", &["it was wear and tear"])
+            .with("sam", &["it's damage and that's only fair"]);
+        let out = conduct(s, &ScriptedBrain, &inputs);
+        assert!(out.events.iter().any(|e| e == "acknowledge_evidence"));
+        assert!(out.evidence_acknowledged);
+        let t = render_transcript(&out);
+        assert!(t.contains("photo of the stain"));
     }
 }
