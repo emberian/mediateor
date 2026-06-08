@@ -231,6 +231,7 @@ pub fn router(state: AppState) -> Router {
         .route("/session/:dispute_id", get(mediation_session))
         .route("/talk/:dispute_id/:party_id", get(talk_start))
         .route("/talk/:sid/:party_id/say", post(talk_say))
+        .route("/talk/:sid/:party_id/where", get(talk_where))
         .route(
             "/settlement/:dispute_id/:idx/accept",
             post(settlement_accept),
@@ -501,6 +502,10 @@ async fn talk_start(
                   placeholder=(format!("Speak as {name}…"));
             button type="submit" { "Say it" }
         }
+        button .where-btn hx-get=(format!("/talk/{}/{}/where", sid, party.id))
+               hx-target="#chat" hx-swap="beforeend" {
+            "When you're ready — see where this could land →"
+        }
         p .session-foot {
             @if state.live_llm_enabled { "The mediator is Claude Haiku 4.5, live." }
             @else { "The mediator is a scripted preview voice (the live model runs on the deployed site)." }
@@ -580,13 +585,72 @@ async fn talk_say(
     (StatusCode::OK, frag).into_response()
 }
 
+/// "Where this could land": the mediator steps back from the private caucus and
+/// shows the certified shared ground, the crux (handed back), and the fair
+/// options — tying the felt conversation to the trustworthy resolution.
+async fn talk_where(
+    Path((sid, _party)): Path<(String, String)>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let session = {
+        let map = state.sessions.read().await;
+        match map.get(&sid) {
+            Some(s) => s.clone(),
+            None => {
+                return (
+                    StatusCode::OK,
+                    html! { div .b.sys { p { "That conversation expired — start again from the seat picker." } } },
+                )
+                    .into_response()
+            }
+        }
+    };
+
+    let live = state.live_llm_enabled;
+    let (shared, crux, opts) = tokio::task::spawn_blocking(move || {
+        let brain: Box<dyn MediatorBrain> = if live {
+            LiveBrain::new()
+                .map(|b| Box::new(b) as Box<dyn MediatorBrain>)
+                .unwrap_or_else(|_| Box::new(ScriptedBrain))
+        } else {
+            Box::new(ScriptedBrain)
+        };
+        let shared = brain.shared_ground(&session);
+        let crux = brain.crux(&session);
+        let opts: Vec<String> = brain.proposals(&session).into_iter().map(|d| d.summary).collect();
+        (shared, crux, opts)
+    })
+    .await
+    .expect("where task");
+
+    let frag = html! {
+        div .b.med { span .who { "mediator" } p { "Okay — let me step back and show you the bigger picture, with both sides in view." } }
+        div .b.med { span .who { "mediator" } p { (shared) } }
+        div .b.med { span .who { "mediator" } p { (crux) } }
+        @if !opts.is_empty() {
+            div .session-options {
+                @for o in &opts {
+                    div .opt { span .opt-badge { "fair · certified" } span .opt-sum { (o) } }
+                }
+            }
+        }
+        p .session-foot {
+            "Every fact shown here was checked by the prover — the mediator can't "
+            "fudge a number or invent a fact. The open question above is yours to answer."
+        }
+    };
+    (StatusCode::OK, frag).into_response()
+}
+
 const TALK_CSS: &str = r#"
 .talkform { display: flex; gap: .5rem; margin: 1rem 0 .4rem; }
 .talkin { flex: 1; padding: .65rem .8rem; border-radius: 12px; border: 1px solid #d8cbb6; font: inherit; background: #fff; }
 .talkform button { padding: .65rem 1.1rem; border-radius: 12px; border: 0; background: #c06a3e; color: #fff; font: inherit; cursor: pointer; }
 .talkform button:hover { background: #a85a32; }
 #chat { min-height: 7rem; }
-@media (prefers-color-scheme: dark) { .talkin { background: #1f1d1a; color: #eee; border-color: #3a3328; } }
+.where-btn { margin-top: .6rem; background: transparent; border: 1px solid #d8cbb6; border-radius: 12px; padding: .6rem 1rem; cursor: pointer; font: inherit; opacity: .9; }
+.where-btn:hover { background: #fbf6ee; opacity: 1; }
+@media (prefers-color-scheme: dark) { .talkin { background: #1f1d1a; color: #eee; border-color: #3a3328; } .where-btn { color: inherit; } .where-btn:hover { background: #2a2620; } }
 "#;
 
 // ─────────────────────────────── the gallery ─────────────────────────────────
