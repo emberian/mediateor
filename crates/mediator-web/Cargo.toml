@@ -12,6 +12,7 @@ mediator-core = { workspace = true }
 mediator-prover = { workspace = true }
 mediator-fairdiv = { workspace = true }
 mediator-llm = { workspace = true }
+mediator-session = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
