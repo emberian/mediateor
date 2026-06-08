@@ -1,0 +1,45 @@
+{
+  "title": "Roommate move-out pact — Robin & Sam settle the deposit in advance",
+  "parties": ["Robin (moving out)", "Sam (staying, holds the deposit)"],
+  "predicates": [
+    {
+      "name": "stain_is_damage",
+      "arg_sorts": [],
+      "ret": "Bool",
+      "gloss": "the carpet stain counts as chargeable damage (vs. ordinary wear) — the contested future crux, left uninterpreted"
+    },
+    {
+      "name": "notice_days",
+      "arg_sorts": [],
+      "ret": "Int",
+      "gloss": "how many days' notice Robin gives before moving out — an agreed, measurable integer (the 30-day cliff is stipulated)"
+    }
+  ],
+  "clauses": [
+    {
+      "name": "clean",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 30 }, { "App": ["notice_days", []] } ] },
+          { "Not": { "Atom": { "App": ["stain_is_damage", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 120000 } ] }
+    },
+    {
+      "name": "damaged",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 30 }, { "App": ["notice_days", []] } ] },
+          { "Atom": { "App": ["stain_is_damage", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 90000 } ] }
+    },
+    {
+      "name": "short",
+      "guard": { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
+    }
+  ]
+}
