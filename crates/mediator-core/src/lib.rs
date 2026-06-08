@@ -298,10 +298,14 @@ fn claimed_total_value(dispute: &Dispute) -> Option<i64> {
 /// whose RHS is a nullary atom (e.g. `stain_is_damage`, `work_met_spec`).
 fn crux_predicate(dispute: &Dispute) -> Option<String> {
     for f in &dispute.stipulated {
-        if let Formula::Iff(_, rhs) = f {
-            if let Formula::Atom(Term::App(name, args)) = &**rhs {
-                if args.is_empty() {
-                    return Some(name.clone());
+        if let Formula::Iff(lhs, rhs) = f {
+            // Whichever side of the bridge is a bare nullary predicate is the
+            // contested fact; prefer the right side for back-compat.
+            for side in [rhs, lhs] {
+                if let Formula::Atom(Term::App(name, args)) = &**side {
+                    if args.is_empty() {
+                        return Some(name.clone());
+                    }
                 }
             }
         }

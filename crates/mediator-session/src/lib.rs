@@ -25,6 +25,8 @@ use std::collections::HashMap;
 mod live;
 pub use live::{LiveBrain, DEFAULT_MEDIATOR_MODEL, DEFAULT_REGION};
 
+pub mod intake;
+
 // ───────────────────────────── session state ─────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
