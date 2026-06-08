@@ -57,9 +57,9 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/", get(landing))
-        .route("/party/{id}", get(party_view))
+        .route("/party/:id", get(party_view))
         .route("/operator", get(operator_view))
-        .route("/settlement/{idx}/accept", post(settlement_accept))
+        .route("/settlement/:idx/accept", post(settlement_accept))
         .nest_service("/static", tower_http::services::ServeDir::new(static_dir))
         .with_state(shared)
 }
@@ -603,4 +603,220 @@ async fn settlement_accept(
 #[derive(serde::Deserialize)]
 struct AcceptForm {
     party: String,
+}
+
+// ─────────────────────────────────── tests ───────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use mediator_types::{
+        Analysis, Claim, Conflict, ContestedItem, Dispute, Formula, Ledger,
+        LedgerItem, Party, Settlement, Term, Valuation,
+    };
+    use tower::ServiceExt; // for `.oneshot()`
+
+    /// Build a minimal Dispute + Analysis that exercises all the routes.
+    fn fixture() -> AppState {
+        let dispute = Dispute {
+            title: "Test Roommate Dispute".to_string(),
+            parties: vec![
+                Party {
+                    id: "robin".to_string(),
+                    display_name: "Robin (moving out)".to_string(),
+                    signature: vec![],
+                },
+                Party {
+                    id: "sam".to_string(),
+                    display_name: "Sam (staying)".to_string(),
+                    signature: vec![],
+                },
+            ],
+            claims: vec![
+                Claim {
+                    id: "r1".to_string(),
+                    party: "robin".to_string(),
+                    nl: "The carpet stain was ordinary wear and tear.".to_string(),
+                    formula: Formula::Not(Box::new(Formula::Atom(Term::App(
+                        "stain_is_damage".to_string(),
+                        vec![],
+                    )))),
+                    english_render: "It is not the case that the stain is damage.".to_string(),
+                    weight: 7,
+                    defeasible: false,
+                    active: true,
+                },
+            ],
+            stipulated: vec![],
+            ledger: Ledger {
+                deposit_cents: 120_000,
+                items: vec![
+                    LedgerItem {
+                        id: "cleaning".to_string(),
+                        label: "Professional cleaning".to_string(),
+                        amount_cents: 15_000,
+                        asserted_by: "sam".to_string(),
+                        disputed: false,
+                    },
+                ],
+            },
+            contested_items: vec![
+                ContestedItem {
+                    id: "couch".to_string(),
+                    label: "The shared couch".to_string(),
+                    divisible: false,
+                },
+            ],
+            valuations: vec![
+                Valuation { party: "robin".to_string(), item: "couch".to_string(), points: 60 },
+                Valuation { party: "sam".to_string(),   item: "couch".to_string(), points: 40 },
+            ],
+        };
+
+        let analysis = Analysis {
+            shared_core: vec!["Both parties agree Robin lived there.".to_string()],
+            genuine_conflicts: vec![Conflict {
+                description: "Is the stain damage?".to_string(),
+                parties: vec!["robin".to_string(), "sam".to_string()],
+                claim_ids: vec!["r1".to_string(), "s1".to_string()],
+            }],
+            dissolved: vec!["Sam's $500 verbal claim dissolved by itemized ledger.".to_string()],
+            ledger_refund_cents: Some(105_000),
+            ledger_findings: vec!["Claimed total $500 refuted; itemized = $450.".to_string()],
+            crux: Some("stain_is_damage — the whole dispute reduces to this.".to_string()),
+            settlements: vec![Settlement {
+                label: "Wear-and-tear settlement".to_string(),
+                allocations: vec![("couch".to_string(), "robin".to_string())],
+                splits: vec![],
+                party_points: vec![
+                    ("robin".to_string(), 60.0),
+                    ("sam".to_string(), 40.0),
+                ],
+                envy_free: true,
+                equitable: true,
+                pareto_optimal: true,
+                explanation: "Robin keeps the couch; deposit refunded in full minus cleaning."
+                    .to_string(),
+            }],
+        };
+
+        AppState::new(dispute, analysis)
+    }
+
+    #[tokio::test]
+    async fn test_landing_returns_200_with_title() {
+        let app = router(fixture());
+        let req = Request::builder()
+            .uri("/")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&body).unwrap();
+        assert!(html.contains("Test Roommate Dispute"), "title missing from landing");
+        assert!(html.contains("Robin"), "Robin link missing");
+        assert!(html.contains("Sam"), "Sam link missing");
+        assert!(html.contains("Operator"), "Operator link missing");
+    }
+
+    #[tokio::test]
+    async fn test_party_robin_returns_200_with_crux() {
+        let app = router(fixture());
+        let req = Request::builder()
+            .uri("/party/robin")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&body).unwrap();
+        assert!(html.contains("Robin"), "party name missing");
+        assert!(html.contains("stain_is_damage"), "crux missing");
+        assert!(html.contains("$1050.00"), "refund amount missing");
+        assert!(html.contains("Wear-and-tear settlement"), "settlement card missing");
+    }
+
+    #[tokio::test]
+    async fn test_party_unknown_returns_404() {
+        let app = router(fixture());
+        let req = Request::builder()
+            .uri("/party/nobody")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_operator_returns_200_with_conflicts() {
+        let app = router(fixture());
+        let req = Request::builder()
+            .uri("/operator")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&body).unwrap();
+        assert!(html.contains("Is the stain damage?"), "conflict description missing");
+        assert!(html.contains("ISOLATED"), "crux status missing");
+        assert!(html.contains("Claimed total $500 refuted"), "ledger finding missing");
+    }
+
+    #[tokio::test]
+    async fn test_static_htmx_route_is_wired() {
+        // The file is vendored; we just verify the route responds (not 404).
+        // ServeDir will serve it if the file exists on disk.
+        let app = router(fixture());
+        let req = Request::builder()
+            .uri("/static/htmx.min.js")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // 200 = file found; anything other than 404 also means the route is
+        // wired (e.g. 304 Not Modified in some configs). We just check ≠ 404.
+        assert_ne!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "htmx.min.js not served — check static/ directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_settlement_accept_returns_fragment() {
+        let app = router(fixture());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/settlement/0/accept")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from("party=robin"))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&body).unwrap();
+        // Should return the card fragment, not a full page.
+        assert!(!html.contains("<!DOCTYPE"), "should be a fragment, not a full page");
+        assert!(html.contains("Wear-and-tear settlement"), "settlement label missing from fragment");
+        // Robin has accepted; waiting on the other party.
+        assert!(
+            html.contains("waiting on the other party"),
+            "acceptance message missing from fragment"
+        );
+    }
 }
