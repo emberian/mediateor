@@ -50,9 +50,9 @@ pub enum Provider {
     DeepSeek,
     Mistral,
     Amazon,
-    /// NVIDIA — the lineage of the open flagship, Nemotron.
+        /// NVIDIA — kept for inference of legacy model ids that contain "nvidia" or "nemotron".
     Nvidia,
-    /// Alibaba — the lineage of the open Qwen models.
+    /// Alibaba — the lineage of the open Qwen models (incl. Qwen3-VL 235B, the flagship voice).
     Qwen,
     Other,
 }
@@ -72,10 +72,10 @@ impl Provider {
     }
 
     /// Whether this lineage is open (open-weights / open model) rather than a
-    /// closed, proprietary one. DeepSeek, Mistral, NVIDIA (Nemotron), and
-    /// Alibaba (Qwen) ship open models; Anthropic and Amazon are proprietary.
-    /// `Other` is treated as not-known-open (conservative: only enthrone
-    /// lineages we can vouch are open).
+    /// closed, proprietary one. DeepSeek, Mistral, NVIDIA, and Alibaba (Qwen)
+    /// ship open models; Anthropic and Amazon are proprietary. `Other` is
+    /// treated as not-known-open (conservative: only enthrone lineages we can
+    /// vouch are open).
     pub fn is_open(&self) -> bool {
         matches!(
             self,
@@ -142,45 +142,49 @@ impl ModelSpec {
 // These are the verified ids on the `commonquant-ember` account. The Converse
 // API path is identical for every one of them; only the id string differs.
 
-/// Claude Haiku 4.5 (Anthropic) — fast, warm. The mediator's own family.
+/// Claude Haiku 4.5 (Anthropic) — fast, warm. Available for the mixed panel.
 pub const MODEL_CLAUDE_HAIKU_45: &str = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 /// DeepSeek V3.2 — strong, independent reasoning. Used as the *neutrality*
-/// judge precisely because it is NOT the Claude mediator voice.
+/// judge precisely because it is NOT the Qwen mediator voice (independent lineage,
+/// uncorrelated blind spots).
 pub const MODEL_DEEPSEEK_V32: &str = "deepseek.v3.2";
-/// Mistral Large 3 (675B) — a big, uncorrelated European model.
+/// Mistral Large 3 (675B) — a big, uncorrelated European open model.
 pub const MODEL_MISTRAL_LARGE_3: &str = "mistral.mistral-large-3-675b-instruct";
-/// Amazon Nova Pro — a big Amazon model, a third independent lineage.
+/// Amazon Nova Pro — available for mixed panels; proprietary lineage.
 pub const MODEL_NOVA_PRO: &str = "amazon.nova-pro-v1:0";
 /// Amazon Nova Lite — cheap, fast, for high-volume / latency-sensitive work.
 pub const MODEL_NOVA_LITE: &str = "amazon.nova-lite-v1:0";
 
 // ── fully-open council ids (Converse API, same uniform path) ──────────────
 //
-// These are the open-weights / open models used to make a council with **no
-// proprietary power enthroned** possible. Confirmed-working on `commonquant-ember`.
+// Confirmed-working on `commonquant-ember`. These are the open-weights models
+// that constitute the default open council — **no proprietary power enthroned**.
 
-/// NVIDIA Nemotron Super 3 (120B) — **fully open**. The FLAGSHIP of the open
-/// council and the model the mediator's *voice* uses (see [`FLAGSHIP_MODEL`]).
-pub const MODEL_NEMOTRON_SUPER_3: &str = "nvidia.nemotron-super-3-120b";
-/// Qwen3-Next 80B (A3B) — open, a distinct lineage from Nemotron/DeepSeek/Mistral.
-pub const MODEL_QWEN3_NEXT: &str = "qwen.qwen3-next-80b-a3b";
+/// Qwen3-VL 235B (22B-active MoE, Alibaba) — **fully open**, the FLAGSHIP
+/// voice of the mediator. The face the parties hear is an open model: values
+/// made literal. `mediator-session` / `mediator-web` adopt this for the
+/// mediator's prose.
+pub const MODEL_QWEN3_VL_235B: &str = "qwen.qwen3-vl-235b-a22b";
 
 /// The open model the mediator's **voice** speaks in. Values made literal: the
 /// face the parties hear is itself a fully-open model, not a proprietary one.
 /// `mediator-session` / `mediator-web` adopt this for the mediator's prose.
-pub const FLAGSHIP_MODEL: &str = MODEL_NEMOTRON_SUPER_3;
+pub const FLAGSHIP_MODEL: &str = MODEL_QWEN3_VL_235B;
 
-/// Truthy ⇒ [`LiveConfig::default`] returns the fully-open council. The
-/// "no proprietary power enthroned" stance, selectable at runtime without a
-/// recompile. Recognized truthy values: `1`, `true`, `yes`, `on` (any case).
+/// When set to a *falsy* value (`0`, `false`, `no`, `off`) this overrides the
+/// default and selects the proprietary-diverse panel instead of the open one.
+/// Unset or truthy ⇒ [`LiveConfig::default`] returns the fully-open council
+/// (the default). Recognized falsy values: `0`, `false`, `no`, `off` (any case).
 pub const OPEN_COUNCIL_ENV: &str = "MEDIATEOR_OPEN_COUNCIL";
 
-/// Whether `MEDIATEOR_OPEN_COUNCIL` is set to a truthy value in the environment.
+/// Whether the open council is the current default. Returns `true` unless
+/// `MEDIATEOR_OPEN_COUNCIL` is explicitly set to a falsy value. The open
+/// council is the default — no proprietary power enthroned by default.
 /// Reads the process environment each call (so a test can set/unset it).
 pub fn open_council_requested() -> bool {
     std::env::var(OPEN_COUNCIL_ENV)
         .map(|v| is_truthy(&v))
-        .unwrap_or(false)
+        .unwrap_or(true) // open by default
 }
 
 fn is_truthy(v: &str) -> bool {
@@ -202,14 +206,18 @@ pub const HIGH_VOLUME_MODEL: &str = MODEL_NOVA_LITE;
 /// constant is the single source of truth shared with [`crate::neutrality`].
 pub const NEUTRALITY_MODEL: &str = MODEL_DEEPSEEK_V32;
 
-/// The default **formalization panel**: a deliberately *diverse and big* set
-/// spanning four independent providers (Anthropic, DeepSeek, Mistral, Amazon).
-/// Their biases are uncorrelated, so where they disagree on the normalized IR,
-/// the disagreement localizes genuine ambiguity rather than one model's quirk.
+/// A mixed **formalization panel** spanning four independent providers
+/// (Anthropic, DeepSeek, Mistral, Amazon). Useful when a proprietary-diverse
+/// panel is explicitly preferred over the open default. Their biases are
+/// uncorrelated, so where they disagree on the normalized IR the disagreement
+/// localizes genuine ambiguity rather than one model's quirk.
 ///
-/// Latency note: this is the depth path — four concurrent calls, one of them a
-/// 675B model. For latency-sensitive / high-volume work use a single
-/// [`HIGH_VOLUME_MODEL`] read instead (see [`LiveConfig::high_volume`]).
+/// Not the default — use [`open_panel`] / [`LiveConfig::default`] for the
+/// values-aligned open council. Available when `MEDIATEOR_OPEN_COUNCIL=0`.
+///
+/// Latency note: four concurrent calls, one of them a 675B model. For
+/// latency-sensitive / high-volume work use a single [`HIGH_VOLUME_MODEL`]
+/// read instead (see [`LiveConfig::high_volume`]).
 pub fn default_panel() -> Vec<ModelSpec> {
     vec![
         ModelSpec::new(MODEL_CLAUDE_HAIKU_45, "Claude Haiku 4.5"),
@@ -219,25 +227,24 @@ pub fn default_panel() -> Vec<ModelSpec> {
     ]
 }
 
-/// The **fully-open council**: every member is an open-weights / open model, so
-/// *no proprietary power is enthroned*. This is the project's values made
-/// literal — a stranger can trust the council without trusting any one company's
-/// closed model, because the whole panel is inspectable lineage. It is led by
-/// the open flagship, NVIDIA Nemotron Super 3 (120B), and spans four
-/// uncorrelated open lineages (NVIDIA, DeepSeek, Alibaba/Qwen, Mistral) so its
-/// *disagreement* signal stays as strong as the proprietary-diverse panel's.
+/// The **fully-open council** — the default panel. Every member is an
+/// open-weights model, so *no proprietary power is enthroned*. This is the
+/// project's constitution made literal: a stranger can trust the council
+/// without trusting any one company's closed model, because the whole panel is
+/// inspectable lineage. It spans three uncorrelated open lineages (Mistral,
+/// DeepSeek, Alibaba/Qwen).
 ///
-/// Members:
-/// - NVIDIA Nemotron Super 3 (120B) — the open flagship;
-/// - DeepSeek V3.2 — open weights;
-/// - Qwen3-Next 80B (A3B) — open;
-/// - Mistral Large 3 (675B) — open-ish, big.
+/// Members (in order):
+/// - Mistral Large 3 (675B) — large open European model;
+/// - DeepSeek V3.2 — strong open reasoning (also the neutrality judge);
+/// - Qwen3-VL 235B — the open flagship and the mediator's **voice**.
+///
+/// This is returned by [`LiveConfig::default`] and [`LiveConfig::open`].
 pub fn open_panel() -> Vec<ModelSpec> {
     vec![
-        ModelSpec::new(MODEL_NEMOTRON_SUPER_3, "Nemotron Super 3 (120B)"),
-        ModelSpec::new(MODEL_DEEPSEEK_V32, "DeepSeek V3.2"),
-        ModelSpec::new(MODEL_QWEN3_NEXT, "Qwen3-Next 80B"),
         ModelSpec::new(MODEL_MISTRAL_LARGE_3, "Mistral Large 3 (675B)"),
+        ModelSpec::new(MODEL_DEEPSEEK_V32, "DeepSeek V3.2"),
+        ModelSpec::new(MODEL_QWEN3_VL_235B, "Qwen3-VL 235B"),
     ]
 }
 
@@ -249,12 +256,15 @@ pub struct LiveConfig {
 }
 
 impl Default for LiveConfig {
-    /// The diverse, big formalization panel across four providers — **unless**
-    /// `MEDIATEOR_OPEN_COUNCIL` is truthy in the environment, in which case the
-    /// fully-open council ([`LiveConfig::open`]) is returned instead. This lets
-    /// an operator enthrone *no proprietary model* with a single env var, and
-    /// every caller that uses `LiveConfig::default()` (session intake, the web
-    /// front end, the `live-formalize` bin) inherits the choice transparently.
+    /// The **fully-open council** ([`open_panel`]) — no proprietary power
+    /// enthroned by default. The constitution made literal: the parties interact
+    /// with an open-lineage panel they can trust without trusting any single
+    /// company's closed model.
+    ///
+    /// Override with `MEDIATEOR_OPEN_COUNCIL=0` (or any falsy value) to use the
+    /// proprietary-diverse [`default_panel`] instead. Every caller that uses
+    /// `LiveConfig::default()` — session intake, the web front end, the
+    /// `live-formalize` bin — inherits the choice transparently.
     fn default() -> Self {
         if open_council_requested() {
             Self::open()
@@ -269,8 +279,8 @@ impl Default for LiveConfig {
 
 impl LiveConfig {
     /// The **fully-open council** ([`open_panel`]): no proprietary power
-    /// enthroned, led by the open flagship Nemotron Super 3. Use this (or set
-    /// `MEDIATEOR_OPEN_COUNCIL=1`) to run the mediator on open models end to end.
+    /// enthroned, voiced by the open flagship Qwen3-VL 235B. This is also the
+    /// result of [`LiveConfig::default`] — the open council is the default.
     pub fn open() -> Self {
         Self {
             region: "us-east-1".to_string(),
@@ -1415,23 +1425,24 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_a_diverse_big_panel() {
-        // Hold the env guard and ensure the open-council var is unset, so this
-        // observes the proprietary-diverse default regardless of test ordering.
+    fn default_config_is_the_open_panel() {
+        // Hold the env guard and ensure the open-council var is unset so the
+        // implicit default (open council) is observed regardless of test ordering.
         let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(OPEN_COUNCIL_ENV);
         let cfg = LiveConfig::default();
         assert_eq!(cfg.region, "us-east-1");
-        // Diverse + big: four models.
-        assert_eq!(cfg.models.len(), 4);
-        assert_eq!(cfg.models[0].label, "Claude Haiku 4.5");
-        // Spans four distinct, uncorrelated providers.
+        // The open panel: three fully-open models.
+        assert_eq!(cfg.models.len(), 3);
+        assert_eq!(cfg.models[0].label, "Mistral Large 3 (675B)");
+        assert_eq!(cfg.models[2].label, "Qwen3-VL 235B");
+        // Fully open — no proprietary model enthroned.
+        assert!(cfg.is_fully_open());
         let provs = cfg.providers();
-        assert_eq!(provs.len(), 4, "panel should span 4 providers: {provs:?}");
-        assert!(provs.contains(&Provider::Anthropic));
-        assert!(provs.contains(&Provider::DeepSeek));
+        assert_eq!(provs.len(), 3, "panel should span 3 open providers: {provs:?}");
         assert!(provs.contains(&Provider::Mistral));
-        assert!(provs.contains(&Provider::Amazon));
+        assert!(provs.contains(&Provider::DeepSeek));
+        assert!(provs.contains(&Provider::Qwen));
     }
 
     #[test]
@@ -1462,13 +1473,13 @@ mod tests {
     }
 
     #[test]
-    fn neutrality_model_is_independent_of_the_claude_mediator() {
-        // The neutrality judge must NOT share the mediator's (Claude) lineage,
-        // or it inherits correlated blind spots.
+    fn neutrality_model_is_independent_of_the_qwen_mediator() {
+        // The neutrality judge must NOT share the mediator's (Qwen) lineage,
+        // or it inherits correlated blind spots. DeepSeek is independent of Qwen.
         assert_ne!(
             Provider::from_model_id(NEUTRALITY_MODEL),
-            Provider::Anthropic,
-            "neutrality judge must be independent of the Claude mediator voice"
+            Provider::Qwen,
+            "neutrality judge must be independent of the Qwen mediator voice"
         );
         assert_eq!(Provider::from_model_id(NEUTRALITY_MODEL), Provider::DeepSeek);
     }
@@ -1476,21 +1487,22 @@ mod tests {
     // ── fully-open council ────────────────────────────────────────────────
 
     #[test]
-    fn open_panel_is_nemotron_led_and_four_open_models() {
+    fn open_panel_is_three_open_models_voiced_by_qwen() {
         let panel = open_panel();
-        assert_eq!(panel.len(), 4);
-        // Nemotron Super 3 leads (the open flagship, the mediator's voice).
-        assert_eq!(panel[0].id, MODEL_NEMOTRON_SUPER_3);
-        assert_eq!(panel[0].provider(), Provider::Nvidia);
+        assert_eq!(panel.len(), 3);
+        // Mistral leads, Qwen3-VL 235B is the flagship voice at the end.
+        assert_eq!(panel[0].id, MODEL_MISTRAL_LARGE_3);
+        assert_eq!(panel[0].provider(), Provider::Mistral);
+        assert_eq!(panel[2].id, MODEL_QWEN3_VL_235B);
+        assert_eq!(panel[2].provider(), Provider::Qwen);
         // The exact open membership, in order.
         let ids: Vec<&str> = panel.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(
             ids,
             vec![
-                MODEL_NEMOTRON_SUPER_3,
-                MODEL_DEEPSEEK_V32,
-                MODEL_QWEN3_NEXT,
                 MODEL_MISTRAL_LARGE_3,
+                MODEL_DEEPSEEK_V32,
+                MODEL_QWEN3_VL_235B,
             ]
         );
     }
@@ -1507,37 +1519,38 @@ mod tests {
     }
 
     #[test]
-    fn open_panel_spans_four_uncorrelated_open_providers() {
+    fn open_panel_spans_three_uncorrelated_open_providers() {
         let cfg = LiveConfig::open();
         let provs = cfg.providers();
-        assert_eq!(provs.len(), 4, "open council spans 4 providers: {provs:?}");
-        assert!(provs.contains(&Provider::Nvidia));
+        assert_eq!(provs.len(), 3, "open council spans 3 providers: {provs:?}");
+        assert!(provs.contains(&Provider::Mistral));
         assert!(provs.contains(&Provider::DeepSeek));
         assert!(provs.contains(&Provider::Qwen));
-        assert!(provs.contains(&Provider::Mistral));
     }
 
     #[test]
-    fn flagship_is_open_nemotron() {
-        assert_eq!(FLAGSHIP_MODEL, MODEL_NEMOTRON_SUPER_3);
-        assert_eq!(Provider::from_model_id(FLAGSHIP_MODEL), Provider::Nvidia);
+    fn flagship_is_open_qwen3_vl() {
+        assert_eq!(FLAGSHIP_MODEL, MODEL_QWEN3_VL_235B);
+        assert_eq!(Provider::from_model_id(FLAGSHIP_MODEL), Provider::Qwen);
         assert!(Provider::from_model_id(FLAGSHIP_MODEL).is_open());
         // The flagship the mediator's voice uses must itself be open.
         assert!(ModelSpec::new(FLAGSHIP_MODEL, "flagship").is_open());
     }
 
     #[test]
-    fn new_open_model_constants_infer_open_providers() {
+    fn open_model_constants_infer_open_providers() {
+        // Qwen3-VL 235B — the flagship voice.
+        assert_eq!(
+            Provider::from_model_id("qwen.qwen3-vl-235b-a22b"),
+            Provider::Qwen
+        );
+        assert!(Provider::Qwen.is_open());
+        // Nvidia ids still resolve correctly (legacy / available-but-not-in-open-panel).
         assert_eq!(
             Provider::from_model_id("nvidia.nemotron-super-3-120b"),
             Provider::Nvidia
         );
-        assert_eq!(
-            Provider::from_model_id("qwen.qwen3-next-80b-a3b"),
-            Provider::Qwen
-        );
         assert!(Provider::Nvidia.is_open());
-        assert!(Provider::Qwen.is_open());
         // The proprietary lineages are explicitly NOT open.
         assert!(!Provider::Anthropic.is_open());
         assert!(!Provider::Amazon.is_open());
@@ -1569,6 +1582,16 @@ mod tests {
     fn env_selects_open_council_for_default() {
         // Serialize with other env-touching tests; clear on the way out.
         let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Unset (the normal case): open council is the default.
+        std::env::remove_var(OPEN_COUNCIL_ENV);
+        assert!(
+            LiveConfig::default().is_fully_open(),
+            "unset env must yield the open council (the default)"
+        );
+        assert_eq!(LiveConfig::default().models, open_panel());
+
+        // Explicitly truthy: also the open council.
         std::env::set_var(OPEN_COUNCIL_ENV, "1");
         let cfg = LiveConfig::default();
         assert!(
@@ -1578,15 +1601,15 @@ mod tests {
         );
         assert_eq!(cfg.models, open_panel());
 
+        // Explicitly falsy: the proprietary-diverse panel is the override.
         std::env::set_var(OPEN_COUNCIL_ENV, "0");
         assert!(
             !LiveConfig::default().is_fully_open(),
-            "falsy env must keep the proprietary-diverse default"
+            "MEDIATEOR_OPEN_COUNCIL=0 must override to the proprietary-diverse panel"
         );
-
-        std::env::remove_var(OPEN_COUNCIL_ENV);
-        // With the var unset, the default is the diverse (not fully open) panel.
-        assert!(!LiveConfig::default().is_fully_open());
         assert_eq!(LiveConfig::default().models, default_panel());
+
+        // Restore.
+        std::env::remove_var(OPEN_COUNCIL_ENV);
     }
 }

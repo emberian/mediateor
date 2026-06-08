@@ -7,8 +7,8 @@ use crate::load::{DisputeRecord, discover_disputes, scenarios_dir};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use mediator_types::{
-    Analysis, Claim, Conflict, ContestedItem, Dispute, Formula, Ledger, LedgerItem, Party,
-    Settlement, Term, Valuation,
+    Analysis, Claim, Conflict, ContestedItem, Crux, Dispute, Formula, Ledger, LedgerItem, Party,
+    Settlement, Sig, Sort, Term, Valuation, Verdict,
 };
 use tower::ServiceExt; // for `.oneshot()`
 
@@ -96,8 +96,76 @@ fn roommate_record() -> DisputeRecord {
     }
 }
 
+/// A record reducing to TWO contested questions at once (multi-crux), each with
+/// a glossed predicate so the party view can phrase both kindly.
+fn twocrux_record() -> DisputeRecord {
+    let sig = |name: &str, gloss: &str| Sig {
+        name: name.to_string(),
+        arg_sorts: vec![],
+        ret: Sort::Bool,
+        gloss: gloss.to_string(),
+    };
+    let dispute = Dispute {
+        title: "A two-knot dispute".to_string(),
+        parties: vec![
+            Party {
+                id: "ada".to_string(),
+                display_name: "Ada (the founder who left)".to_string(),
+                signature: vec![
+                    sig("departure_breached_vesting", "the departure breached the vesting agreement"),
+                ],
+            },
+            Party {
+                id: "ben".to_string(),
+                display_name: "Ben (the remaining partner)".to_string(),
+                signature: vec![
+                    sig("gift_was_advance", "the $8,000 was an advance, not a gift"),
+                ],
+            },
+        ],
+        claims: vec![],
+        stipulated: vec![],
+        ledger: Ledger { deposit_cents: 0, items: vec![] },
+        contested_items: vec![],
+        valuations: vec![],
+    };
+    let analysis = Analysis {
+        shared_core: vec!["You both want the partnership wound down cleanly.".to_string()],
+        genuine_conflicts: vec![],
+        dissolved: vec![],
+        ledger_refund_cents: None,
+        ledger_findings: vec![],
+        crux: Some("departure_breached_vesting — one of two contested questions.".to_string()),
+        cruxes: vec![
+            Crux {
+                predicate: "departure_breached_vesting".to_string(),
+                question: "Whether the departure breached the vesting agreement".to_string(),
+                verdict: Verdict::Unknown,
+            },
+            Crux {
+                predicate: "gift_was_advance".to_string(),
+                question: "Whether the $8,000 was an advance".to_string(),
+                verdict: Verdict::Unknown,
+            },
+        ],
+        settlements: vec![],
+    };
+    DisputeRecord { id: "twoknot".to_string(), dispute, analysis, receipts: vec![] }
+}
+
 fn fixture_state() -> AppState {
     AppState::new(vec![roommate_record()])
+}
+
+/// State with a deliberately tiny per-IP allowance, for the throttle test.
+fn throttled_state() -> AppState {
+    AppState::new(vec![roommate_record()]).with_rate_config(crate::RateConfig {
+        global_capacity: 100.0,
+        global_refill: 100.0,
+        per_ip_capacity: 3.0,
+        per_ip_refill: 0.0001, // effectively no refill within the test window
+        max_ip_buckets: 64,
+    })
 }
 
 async fn body_string(resp: axum::response::Response) -> String {
@@ -115,7 +183,10 @@ async fn gallery_returns_200_with_copy() {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_string(resp).await;
     assert!(html.contains("Mediateor"), "wordmark missing");
-    assert!(html.contains("See the true shape of a disagreement"), "tagline missing");
+    assert!(html.contains("A calm room for a hard conversation"), "tagline missing");
+    // the room is the centerpiece — the primary CTA enters it
+    assert!(html.contains("Enter the room"), "room CTA missing");
+    assert!(html.contains("/talk/roommate/"), "room link missing");
     assert!(html.contains("Robin"), "dispute card party missing");
     assert!(html.contains("/dispute/roommate"), "dispute link missing");
 }
@@ -153,11 +224,22 @@ async fn session_route_renders_conducted_mediation() {
     assert!(!html.to_lowercase().contains("you are wrong"));
 }
 
+/// Pull the freshly-created session id out of the room page (it's in the say-url
+/// `hx-post` of the room form).
+fn sid_from_room(html: &str) -> String {
+    let say = html
+        .split("/say\"")
+        .next()
+        .and_then(|s| s.rsplit("/talk/").next())
+        .unwrap_or("");
+    say.split('/').next().unwrap_or("").to_string()
+}
+
 #[tokio::test]
-async fn interactive_talk_round_trip() {
+async fn the_room_opens_and_hears_a_party() {
     let app = router(fixture_state());
 
-    // start a private talk as robin
+    // open the room as robin
     let resp = app
         .clone()
         .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
@@ -165,18 +247,15 @@ async fn interactive_talk_round_trip() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let html = body_string(resp).await;
-    assert!(html.contains("A private word with the mediator"));
+    assert!(html.contains("The room"), "room heading missing");
+    // the evidence drawer is part of the room
+    assert!(html.contains("Add something to the record"), "evidence drawer missing");
 
-    // pull the say-url (carries the freshly-created session id)
-    let say = html
-        .split("hx-post=\"")
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .unwrap_or("")
-        .to_string();
-    assert!(say.starts_with("/talk/s") && say.ends_with("/robin/say"), "say url: {say}");
+    let sid = sid_from_room(&html);
+    assert!(sid.starts_with('s'), "sid: {sid} (html had no say-url?)");
+    let say = format!("/talk/{sid}/robin/say");
 
-    // say something → get the mediator's reply as a fragment
+    // say something → the mediator reflects (and checks an interest back)
     let req = Request::builder()
         .method("POST")
         .uri(&say)
@@ -187,43 +266,424 @@ async fn interactive_talk_round_trip() {
     assert_eq!(resp.status(), StatusCode::OK);
     let frag = body_string(resp).await;
     assert!(frag.to_lowercase().contains("mediator"));
-    // offline → the deterministic scripted caucus reply
+    // offline → the deterministic scripted caucus reply, then a check-back
     assert!(frag.contains("Thank you for telling me"));
+    assert!(frag.contains("check something back") || frag.contains("Am I close"));
 }
 
+/// Driving both parties through to readiness walks the room to its heart: the
+/// shared ground and the one open question are now spoken in the mediator's
+/// voice (no certified bullet/predicate panels in the party's face), while the
+/// two things the parties themselves shaped — the SUBTRACTION and a single
+/// balanced way forward — get a real, central surface.
 #[tokio::test]
-async fn talk_where_shows_certified_resolution() {
+async fn the_room_reaches_the_subtraction_panel() {
     let app = router(fixture_state());
     let resp = app
         .clone()
-        .oneshot(Request::builder().uri("/talk/roommate/sam").body(Body::empty()).unwrap())
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
         .await
         .unwrap();
     let html = body_string(resp).await;
-    // the "see where this could land" button is on the page
-    assert!(html.contains("see where this could land"));
-    // derive the session id from the say-url
-    let say = html
-        .split("hx-post=\"")
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .unwrap_or("");
-    let sid = say.trim_start_matches("/talk/").split('/').next().unwrap_or("");
+    let sid = sid_from_room(&html);
     assert!(sid.starts_with('s'), "sid: {sid}");
 
+    // Each party speaks, then confirms the checked-back interest (the iterated
+    // loop: name it, ask "am I close?", they own it). robin first, then sam.
+    // sam's confirm is the last turn — by then everyone is heard and the
+    // autonomous flow walks all the way to the options (and residue, since the
+    // ledger is certified).
+    let turns = [
+        ("robin", "it was wear and tear, honestly"),
+        ("robin", "yes — that's exactly it"),
+        ("sam", "the carpet is real damage and that's only fair"),
+        ("sam", "right, that's what I mean"),
+    ];
+    let mut frag = String::new();
+    for (p, m) in turns {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/talk/{sid}/{p}/say"))
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("message={m}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        frag = body_string(resp).await;
+    }
+
+    // FOLDED INTO VOICE: the shared ground is spoken warmly, not paneled — and the
+    // certified bullet panel is gone from the party's view.
+    assert!(frag.contains("what you already agree on"), "shared ground should be spoken");
+    assert!(!frag.contains("panel-ground"), "the certified bullet panel must be gone");
+    // FOLDED INTO VOICE: the mediator simply names the one real question; no
+    // predicate-list panel demanding the party stare at a knot.
+    assert!(frag.contains("the one real knot") || frag.contains("yours"), "crux should be spoken");
+    assert!(!frag.contains("panel-crux"), "the crux predicate panel must be gone");
+    assert!(!frag.contains("yours to answer"), "no crux panel kicker");
+    // KEPT CENTRAL: the SUBTRACTION panel — the signature move the parties uncovered.
+    assert!(
+        frag.contains("what was never about money"),
+        "subtraction/residue panel missing: {frag}"
+    );
+    assert!(frag.contains("panel-residue"), "the residue must keep its central surface");
+    // LEAD WITH ONE: a single balanced way forward, acceptable in-session — not
+    // three equal panels. (This fixture carries one settlement, so there's no
+    // disclosure; the multi-option disclosure is covered in `lead_option_*` below.)
+    assert!(frag.contains("A way forward"), "the single lead option missing");
+    assert!(frag.contains("This one works for me"), "in-session accept missing");
+    // BACKSTAGED: the party never reads the machine's vocabulary in the room.
+    assert!(!frag.contains("certified"), "the word 'certified' must not reach the party");
+    assert!(!frag.to_lowercase().contains("ledger"), "the word 'ledger' must not reach the party");
+    // never tells a human they are "wrong", never leaks a formula
+    assert!(!frag.to_lowercase().contains("you are wrong"));
+    assert!(!frag.contains("Forall"));
+}
+
+/// Evidence submitted in the room is stored and acknowledged by the mediator
+/// (woven in), and never decides the open question.
+#[tokio::test]
+async fn the_room_takes_and_acknowledges_evidence() {
+    let app = router(fixture_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    let sid = sid_from_room(&html);
+
+    // both parties get heard fully first (speak + confirm), so the next
+    // autonomous move after evidence arrives is the acknowledgement.
+    for (p, m) in [
+        ("robin", "it was wear and tear"),
+        ("robin", "yes, exactly"),
+        ("sam", "it's damage and that's fair"),
+        ("sam", "right"),
+    ] {
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/talk/{sid}/{p}/say"))
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("message={m}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    // robin adds a concrete fact as evidence
     let resp = app
         .oneshot(
             Request::builder()
-                .uri(format!("/talk/{sid}/sam/where"))
-                .body(Body::empty())
+                .method("POST")
+                .uri(format!("/talk/{sid}/robin/evidence"))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("kind=fact&text=I lived there 2 years and the carpet was already worn&note="))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let frag = body_string(resp).await;
-    assert!(frag.contains("bigger picture"));
-    assert!(frag.to_lowercase().contains("checked by the prover"));
+    assert!(frag.contains("Added to the record"), "evidence not stored/echoed");
+    // the mediator acknowledges the exhibit on the record
+    assert!(
+        frag.to_lowercase().contains("on the record"),
+        "evidence not acknowledged: {frag}"
+    );
+}
+
+/// When two parties put *colliding facts* on the record (different numbers about
+/// the same thing), the room surfaces the honest factual-conflict moment —
+/// speech-led and calm, inside a mediator bubble, not an adjudication panel — and
+/// never implies the machine decided it.
+#[tokio::test]
+async fn the_room_surfaces_a_factual_conflict_without_deciding() {
+    let app = router(fixture_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    let sid = sid_from_room(&html);
+
+    async fn say(app: &axum::Router, sid: &str, p: &str, m: &str) {
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/talk/{sid}/{p}/say"))
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("message={m}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    async fn evidence(app: &axum::Router, sid: &str, p: &str, text: &str) -> String {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/talk/{sid}/{p}/evidence"))
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("kind=fact&text={text}&note=")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        body_string(resp).await
+    }
+
+    say(&app, &sid, "robin", "wear and tear").await;
+    say(&app, &sid, "robin", "yes").await;
+    say(&app, &sid, "sam", "damage").await;
+    say(&app, &sid, "sam", "yes").await;
+
+    evidence(&app, &sid, "robin", "the stain is 10cm across").await;
+    let frag = evidence(&app, &sid, "sam", "the stain is 30cm across").await;
+
+    // the honest factual-conflict moment appears, speech-led…
+    assert!(frag.contains("a question of fact needs evidence"), "conflict surface missing: {frag}");
+    assert!(frag.contains("remember it differently"), "the two accounts should be set side by side");
+    // …spoken in the mediator's voice (a calm bubble), NOT an adjudication panel
+    assert!(frag.contains("b med conflict"), "conflict should ride in a mediator bubble");
+    assert!(!frag.contains("panel-conflict"), "the conflict must not be a hard adjudication panel");
+    // …and the machine explicitly refuses to decide which fact is true
+    assert!(
+        frag.contains("won't decide which of you is right") || frag.contains("wouldn't be fair"),
+        "must not imply the machine decided the fact"
+    );
+}
+
+/// The whole arc in the room: hear both, reach the options, accept one, then
+/// CO-AUTHOR the agreement and sign it — the agreement is theirs, owned by both,
+/// and only then does the room land.
+#[tokio::test]
+async fn the_room_co_authors_and_signs_the_agreement() {
+    let app = router(fixture_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    let sid = sid_from_room(&html);
+
+    async fn say(app: &axum::Router, sid: &str, p: &str, m: &str) -> String {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/talk/{sid}/{p}/say"))
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("message={m}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        body_string(resp).await
+    }
+
+    // hear + confirm both
+    say(&app, &sid, "robin", "wear and tear").await;
+    say(&app, &sid, "robin", "yes exactly").await;
+    say(&app, &sid, "sam", "it's damage").await;
+    let frag = say(&app, &sid, "sam", "right that's it").await;
+    assert!(frag.contains("A way forward"), "should reach the single balanced option");
+    assert!(frag.contains("This one works for me"), "the option should be acceptable in-session");
+
+    // accept option 0 → the co-authoring draft opens
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/talk/{sid}/robin/accept/0"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let frag = body_string(resp).await;
+    assert!(frag.contains("write it down together"), "co-authoring draft should open: {frag}");
+    assert!(frag.contains("name=\"message\""), "draft should be editable");
+
+    // both sign → owned → landed
+    let _ = app
+        .clone()
+        .oneshot(Request::builder().method("POST").uri(format!("/talk/{sid}/robin/sign")).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let resp = app
+        .oneshot(Request::builder().method("POST").uri(format!("/talk/{sid}/sam/sign")).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let frag = body_string(resp).await;
+    assert!(frag.contains("owned by both") || frag.contains("landed"), "agreement should be owned/landed: {frag}");
+}
+
+/// A multi-crux dispute surfaces ALL its open questions — in the gallery chip,
+/// the party view (each phrased kindly), and the signed audit record — and never
+/// implies the machine decided any of them.
+#[tokio::test]
+async fn multi_crux_is_surfaced_everywhere() {
+    let app = router(AppState::new(vec![twocrux_record()]));
+
+    // gallery chip pluralizes
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    assert!(html.contains("2 open questions"), "gallery should show 2 open questions");
+
+    // party view shows BOTH questions, phrased kindly from the glosses
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/party/twoknot/ada").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    assert!(html.contains("questions that are really yours"), "plural crux heading missing");
+    assert!(html.contains("the departure breached the vesting agreement"), "crux 1 missing");
+    assert!(html.contains("an advance, not a gift"), "crux 2 missing");
+    // never implies a decision was made for them, never leaks a formula
+    assert!(!html.contains("wrong"));
+    assert!(!html.contains("Forall"));
+
+    // the signed audit record lists each crux as handed back, not decided
+    let resp = app
+        .oneshot(Request::builder().uri("/audit/twoknot/download").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let json = body_string(resp).await;
+    let rec: mediator_audit::MediationRecord = serde_json::from_str(&json).unwrap();
+    assert!(mediator_audit::verify(&rec).is_ok(), "record must verify");
+    let kinds: Vec<&str> = rec.entries.iter().map(|e| e.kind.as_str()).collect();
+    assert!(
+        kinds.iter().filter(|k| **k == "crux_handed_back").count() == 2,
+        "both cruxes should be recorded as handed back: {kinds:?}"
+    );
+}
+
+/// PUBLIC HARDENING: a burst from a single IP to a model-calling endpoint gets
+/// throttled with a friendly fragment (never a bare 429 to a human), while the
+/// global cap stays high. Offline — the scripted brain handles every call.
+#[tokio::test]
+async fn a_burst_from_one_ip_is_throttled_kindly() {
+    let app = router(throttled_state());
+
+    // Open a room as robin and grab the session id.
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    let say = html
+        .split("/say\"")
+        .next()
+        .and_then(|s| s.rsplit("/talk/").next())
+        .unwrap_or("");
+    let sid = say.split('/').next().unwrap_or("");
+    assert!(sid.starts_with('s'), "sid: {sid}");
+    let say_url = format!("/talk/{sid}/robin/say");
+
+    // Fire a fast burst from ONE IP (per-IP capacity is 3 here). The first few
+    // get a real reply; once the bucket is dry, a calm "one moment" fragment.
+    let mut throttled = false;
+    let mut served = 0;
+    for i in 0..7 {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&say_url)
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("x-forwarded-for", "203.0.113.7")
+                    .body(Body::from(format!("message=turn number {i}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Always a 200 (htmx swaps the fragment) — never a bare 429 to a person.
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp).await;
+        if body.contains("One moment") || body.contains("let's not rush") {
+            throttled = true;
+        } else {
+            served += 1;
+        }
+    }
+    assert!(served >= 1, "at least the first call should be served");
+    assert!(throttled, "a sustained burst from one IP should get the friendly throttle");
+}
+
+/// A *different* IP is unaffected by another IP's exhausted budget — the limit
+/// is genuinely per-peer, not global-only.
+#[tokio::test]
+async fn per_ip_limit_does_not_punish_other_peers() {
+    let app = router(throttled_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    let say = html.split("/say\"").next().and_then(|s| s.rsplit("/talk/").next()).unwrap_or("");
+    let sid = say.split('/').next().unwrap_or("");
+    let say_url = format!("/talk/{sid}/robin/say");
+
+    // Exhaust IP A.
+    for _ in 0..5 {
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&say_url)
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("x-forwarded-for", "198.51.100.1")
+                    .body(Body::from("message=flooding"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    // IP B's first call should still be served (a real reply, not "one moment").
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&say_url)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("x-forwarded-for", "198.51.100.2")
+                .body(Body::from("message=my first words"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_string(resp).await;
+    assert!(!body.contains("One moment"), "a fresh peer must not inherit another's throttle");
+    assert!(body.contains("Thank you for telling me"), "fresh peer should get a real reply");
 }
 
 #[tokio::test]
@@ -495,4 +955,57 @@ async fn formalize_endpoint_404_for_unknown_dispute() {
         "unexpected status: {}",
         resp.status()
     );
+}
+
+// ── the simplified "lead with one" options (pure render, no fixture needed) ──
+
+fn opt(idx: usize, summary: &str, envy_free: bool, equitable: bool) -> crate::OptionView {
+    crate::OptionView { idx, summary: summary.to_string(), envy_free, equitable }
+}
+
+#[test]
+fn lead_option_picks_the_most_balanced() {
+    // the second is both envy-free AND equitable → it leads, even though it's not first
+    let opts = vec![
+        opt(0, "split A", true, false),
+        opt(1, "split B", true, true),
+        opt(2, "split C", false, false),
+    ];
+    assert_eq!(crate::lead_option(&opts), 1);
+    // with nothing to distinguish them, the first leads
+    let flat = vec![opt(0, "a", false, false), opt(1, "b", false, false)];
+    assert_eq!(crate::lead_option(&flat), 0);
+}
+
+#[test]
+fn options_lead_with_one_and_fold_the_rest_behind_a_quiet_disclosure() {
+    // three options → one leads plainly; the other two hide behind a disclosure,
+    // and NONE of the machine's fairness vocabulary reaches the party.
+    let opts = vec![
+        opt(0, "Robin keeps the desk; deposit split evenly", true, true),
+        opt(1, "Sam keeps the desk; Robin takes more deposit", true, false),
+        opt(2, "the desk is sold and the cash split", false, false),
+    ];
+    let beat = crate::Beat::Options(opts);
+    let html = crate::render_beat("s1", "robin", &beat).into_string();
+
+    // exactly one lead card, the rest under a <details>
+    assert!(html.contains("A way forward"), "lead option label missing");
+    assert!(html.contains("Another way"), "non-lead option label missing");
+    assert!(html.contains("<details"), "the other splits should be a quiet disclosure");
+    assert!(html.contains("see 2 other fair splits"), "disclosure summary missing");
+    // every option stays acceptable in-session (all three accept buttons present)
+    assert!(html.contains("/talk/s1/robin/accept/0"));
+    assert!(html.contains("/talk/s1/robin/accept/1"));
+    assert!(html.contains("/talk/s1/robin/accept/2"));
+    // no fairness chips / machine words in the party's face
+    assert!(!html.contains("certified"), "no 'certified' in the room");
+    assert!(!html.contains("envy-free"), "no 'envy-free' chip in the room");
+    assert!(!html.contains("equitable"), "no 'equitable' chip in the room");
+
+    // a single option → no disclosure at all
+    let one = crate::Beat::Options(vec![opt(0, "the only fair split", true, true)]);
+    let html1 = crate::render_beat("s1", "robin", &one).into_string();
+    assert!(html1.contains("A way forward"));
+    assert!(!html1.contains("<details"), "one option needs no disclosure");
 }

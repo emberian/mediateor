@@ -10,6 +10,9 @@ use std::net::SocketAddr;
 
 use mediator_web::{AppState, discover_disputes, router, scenarios_dir};
 
+// `ConnectInfo<SocketAddr>` (used by the per-IP rate limiter as a fallback when
+// there's no `X-Forwarded-For`) requires the connect-info make-service below.
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = scenarios_dir();
@@ -44,6 +47,6 @@ async fn main() -> anyhow::Result<()> {
     println!("   (pick a dispute, then a seat — or watch as the mediator)\n");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
     Ok(())
 }
