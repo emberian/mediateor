@@ -50,6 +50,7 @@ fn roommate_record() -> DisputeRecord {
                 amount_cents: 15_000,
                 asserted_by: "sam".to_string(),
                 disputed: false,
+                controlling_crux: None,
             }],
         },
         contested_items: vec![ContestedItem {
@@ -64,6 +65,7 @@ fn roommate_record() -> DisputeRecord {
     };
 
     let analysis = Analysis {
+        cruxes: Vec::new(),
         shared_core: vec!["You both stipulate: Robin lived there and has moved out.".to_string()],
         genuine_conflicts: vec![Conflict {
             description: "Whether the carpet stain is chargeable damage or ordinary wear — a real disagreement of fact and judgment, not just different words.".to_string(),

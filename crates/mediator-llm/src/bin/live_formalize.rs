@@ -82,6 +82,24 @@ async fn main() {
 
             println!("══ CONSENSUS ═════════════════════════════════════════");
             println!("  {}", council.consensus);
+            println!(
+                "  confidence: {:.2}   condorcet winner: {}",
+                council.confidence, council.condorcet_winner
+            );
+            if council.ranking.len() > 1 {
+                println!("  ranked field (Borda):");
+                for (i, c) in council.ranking.iter().enumerate() {
+                    let provs: Vec<&str> = c.providers.iter().map(|p| p.label()).collect();
+                    println!(
+                        "    {}. {} vote(s), borda {}, providers [{}] — {}",
+                        i + 1,
+                        c.votes,
+                        c.borda,
+                        provs.join(", "),
+                        c.normalized
+                    );
+                }
+            }
             if let Some(f) = &council.agreed {
                 println!("  agreed  : {}", serde_json::to_string(f).unwrap_or_default());
             }

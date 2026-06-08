@@ -1,0 +1,105 @@
+{
+  "title": "Home renovation dispute — Dana (homeowner) and Cyrus (contractor): two contested deductions",
+  "parties": [
+    {
+      "id": "dana",
+      "display_name": "Dana (the homeowner, holds the final payment)",
+      "signature": [
+        { "name": "kitchen_work_defective", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the kitchen cabinetry was installed defectively and must be reworked at Cyrus's cost" },
+        { "name": "change_order_authorized", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Dana authorized the mid-project bathroom change order Cyrus is billing for" }
+      ]
+    },
+    {
+      "id": "cyrus",
+      "display_name": "Cyrus (the contractor)",
+      "signature": [
+        { "name": "contractor_eats_rework", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Cyrus must absorb the cabinetry rework cost rather than bill it" },
+        { "name": "homeowner_owes_change_order", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Dana owes the extra bathroom change-order charge under the contract" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the total of extra charges Cyrus verbally claimed, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "r1", "party": "dana",
+      "nl": "The cabinets were installed crooked and the doors don't close — that's defective work Cyrus has to fix on his own dime.",
+      "formula": { "Atom": { "App": ["kitchen_work_defective", []] } },
+      "english_render": "The kitchen cabinetry was installed defectively.",
+      "weight": 8, "defeasible": false, "active": true
+    },
+    {
+      "id": "s1", "party": "cyrus",
+      "nl": "The cabinetry was installed to spec and passed inspection — there's nothing defective to rework.",
+      "formula": { "Not": { "Atom": { "App": ["kitchen_work_defective", []] } } },
+      "english_render": "It is not the case that the kitchen cabinetry was installed defectively.",
+      "weight": 8, "defeasible": false, "active": true
+    },
+    {
+      "id": "r2", "party": "dana",
+      "nl": "I never approved the bathroom change order — Cyrus did that extra work without my sign-off, so I don't owe it.",
+      "formula": { "Not": { "Atom": { "App": ["change_order_authorized", []] } } },
+      "english_render": "It is not the case that Dana authorized the bathroom change order.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s2", "party": "cyrus",
+      "nl": "Dana told me to go ahead with the upgraded bathroom tile in person — the change order was authorized and is billable.",
+      "formula": { "Atom": { "App": ["change_order_authorized", []] } },
+      "english_render": "Dana authorized the bathroom change order.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s3", "party": "cyrus",
+      "nl": "All told the extra charges come to about nine thousand dollars on top of the base contract.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 900000 } ] },
+      "english_render": "Cyrus's claimed total of extra charges is $9,000.00.",
+      "weight": 3, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["contractor_eats_rework", []] } },
+        { "Atom": { "App": ["kitchen_work_defective", []] } }
+      ]
+    },
+    {
+      "Iff": [
+        { "Atom": { "App": ["homeowner_owes_change_order", []] } },
+        { "Atom": { "App": ["change_order_authorized", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 1500000,
+    "items": [
+      { "id": "base_balance", "label": "Final payment on base contract", "amount_cents": 600000,
+        "asserted_by": "cyrus", "disputed": false },
+      { "id": "cabinet_rework", "label": "Cabinetry rework charge", "amount_cents": 350000,
+        "asserted_by": "cyrus", "disputed": true, "controlling_crux": "kitchen_work_defective" },
+      { "id": "change_order_charge", "label": "Bathroom change-order charge", "amount_cents": 250000,
+        "asserted_by": "cyrus", "disputed": true, "controlling_crux": "change_order_authorized" }
+    ]
+  },
+  "contested_items": [
+    { "id": "leftover_tile", "label": "Leftover premium tile (one pallet)", "divisible": false },
+    { "id": "appliance_credit", "label": "Unused appliance store credit", "divisible": false },
+    { "id": "design_plans", "label": "Architectural design plans and 3D renders", "divisible": false },
+    { "id": "tool_deposit", "label": "Refundable tool-rental deposit", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "dana", "item": "leftover_tile", "points": 35 },
+    { "party": "dana", "item": "appliance_credit", "points": 30 },
+    { "party": "dana", "item": "design_plans", "points": 25 },
+    { "party": "dana", "item": "tool_deposit", "points": 10 },
+    { "party": "cyrus", "item": "leftover_tile", "points": 20 },
+    { "party": "cyrus", "item": "appliance_credit", "points": 15 },
+    { "party": "cyrus", "item": "design_plans", "points": 15 },
+    { "party": "cyrus", "item": "tool_deposit", "points": 50 }
+  ]
+}

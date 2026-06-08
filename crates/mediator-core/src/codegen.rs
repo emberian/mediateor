@@ -162,7 +162,58 @@ pub fn ledger_def_lemmas(dispute: &Dispute) -> Vec<String> {
     defs
 }
 
-/// Frame the six proof obligations for the reduction.
+/// A stipulated bridge `obligation \<longleftrightarrow> crux_predicate`: the
+/// reduction's load-bearing iff and the bare nullary predicate it hands back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CruxBridge {
+    /// Index into `dispute.stipulated` — names the `stip_<i>` axiom.
+    pub stip_index: usize,
+    /// The full iff formula (rendered into the `crux_iff_<k>` goal).
+    pub iff: Formula,
+    /// The contested predicate symbol the dispute hands back (e.g.
+    /// `stain_is_damage`).
+    pub predicate: String,
+}
+
+/// All crux bridges in a dispute, in stipulation order. A real dispute reduces
+/// to a *set* of contested questions: one per stipulated `Iff` whose either side
+/// is a bare nullary predicate. The single-crux roommate case yields exactly
+/// one — preserving the original behavior.
+pub fn crux_bridges(dispute: &Dispute) -> Vec<CruxBridge> {
+    let mut out = Vec::new();
+    for (i, f) in dispute.stipulated.iter().enumerate() {
+        if let Formula::Iff(lhs, rhs) = f {
+            // The contested fact is whichever side is a bare nullary predicate;
+            // prefer the right side for back-compat with the roommate reduction.
+            let mut pred: Option<String> = None;
+            for side in [rhs, lhs] {
+                if let Formula::Atom(Term::App(name, args)) = &**side {
+                    if args.is_empty() {
+                        pred = Some(name.clone());
+                        break;
+                    }
+                }
+            }
+            if let Some(predicate) = pred {
+                out.push(CruxBridge { stip_index: i, iff: f.clone(), predicate });
+            }
+        }
+    }
+    out
+}
+
+/// Frame the proof obligations for the reduction.
+///
+/// Layout:
+///   refund_damage_world, refund_wear_world  — the two ledger worlds
+///   over_claim_refuted                       — the itemization refutation
+///   crux_iff / crux_is_damage / crux_is_wear — the FIRST crux (back-compat
+///                                              names; the original reduction)
+///   crux_iff_<k> / crux_<k>_holds / crux_<k>_fails  for k = 0..n — every crux
+///
+/// The per-crux `_<k>` obligations are the general multi-crux path; the three
+/// legacy names alias crux 0 so the seeded single-crux scenarios are gated by
+/// *identically named* obligations as before.
 pub fn build_obligations(dispute: &Dispute) -> Vec<Obligation> {
     let ledger = &dispute.ledger;
     let deposit = ledger.deposit_cents;
@@ -213,20 +264,33 @@ pub fn build_obligations(dispute: &Dispute) -> Vec<Obligation> {
         });
     }
 
-    // crux_iff: the stipulated lease term, proved straight from its axiom.
+    // The crux bridges: a real dispute reduces to a *set* of contested
+    // questions. Each stipulated `obligation \<longleftrightarrow> predicate`
+    // gives us (a) the iff to prove (the reduction), and (b) the predicate to
+    // hand back undecided.
+    let bridges = crux_bridges(dispute);
+
+    // Legacy back-compat names — alias the FIRST crux. The seeded single-crux
+    // scenarios are gated by exactly these names, identically to before. When
+    // there is no Iff at all we fall back to the historical default goal.
+    let proof_from_stip = |idx: Option<usize>| -> String {
+        match idx {
+            // Prove the iff from its own stipulated axiom only — sharp and fast.
+            Some(i) => format!("by (simp add: stip_{i})"),
+            None if stip_axioms.is_empty() => "by simp".to_string(),
+            None => format!("by (simp add: {stip_joined})"),
+        }
+    };
     obligations.push(Obligation {
         name: "crux_iff".to_string(),
         goal: crux_iff_goal(dispute),
-        proof: if stip_axioms.is_empty() {
-            "by simp".to_string()
-        } else {
-            format!("by (simp add: {stip_joined})")
-        },
+        proof: proof_from_stip(bridges.first().map(|b| b.stip_index)),
     });
 
-    // crux_is_damage / crux_is_wear: best-effort. Expected Unknown — the kernel
-    // must NOT decide the human question. We give a genuine proof attempt so a
-    // *failure* is the informative verdict, not a deliberate `sorry`.
+    // crux_is_damage / crux_is_wear: best-effort over the FIRST crux predicate.
+    // Expected Unknown — the kernel must NOT decide the human question. The
+    // proof attempt is genuine so a *failure* is the informative verdict, not a
+    // deliberate `sorry`.
     let crux_pred = crux_predicate_name(dispute);
     obligations.push(Obligation {
         name: "crux_is_damage".to_string(),
@@ -238,6 +302,30 @@ pub fn build_obligations(dispute: &Dispute) -> Vec<Obligation> {
         goal: format!("\\<not> {crux_pred}"),
         proof: best_effort_proof(&stip_axioms),
     });
+
+    // The general multi-crux obligations. For each bridge k:
+    //   crux_iff_<k>   : prove the reduction (the lease/contract term)  -> Proved
+    //   crux_<k>_holds : the predicate itself                           -> Unknown
+    //   crux_<k>_fails : its negation                                   -> Unknown
+    // Proving the iff while leaving BOTH holds/fails undecided is exactly the
+    // certificate "this reduces to one human question we will not answer."
+    for (k, b) in bridges.iter().enumerate() {
+        obligations.push(Obligation {
+            name: format!("crux_iff_{k}"),
+            goal: formula_to_isabelle(&b.iff),
+            proof: proof_from_stip(Some(b.stip_index)),
+        });
+        obligations.push(Obligation {
+            name: format!("crux_{k}_holds"),
+            goal: b.predicate.clone(),
+            proof: best_effort_proof(&stip_axioms),
+        });
+        obligations.push(Obligation {
+            name: format!("crux_{k}_fails"),
+            goal: format!("\\<not> {}", b.predicate),
+            proof: best_effort_proof(&stip_axioms),
+        });
+    }
 
     obligations
 }
@@ -262,24 +350,14 @@ fn crux_iff_goal(dispute: &Dispute) -> String {
     "tenant_owes_carpet \\<longleftrightarrow> stain_is_damage".to_string()
 }
 
-/// The contested predicate the dispute reduces to: the right-hand side of the
-/// stipulated lease iff (e.g. `stain_is_damage`).
+/// The contested predicate the dispute reduces to: the first crux bridge's
+/// predicate (e.g. `stain_is_damage`), with a back-compat default.
 fn crux_predicate_name(dispute: &Dispute) -> String {
-    for f in &dispute.stipulated {
-        if let Formula::Iff(lhs, rhs) = f {
-            // The crux is whichever side of the bridge is a bare nullary predicate
-            // (the contested fact); the other side may be negated or complex (the
-            // obligation it controls). Prefer the right side for back-compat.
-            for side in [rhs, lhs] {
-                if let Formula::Atom(Term::App(name, args)) = &**side {
-                    if args.is_empty() {
-                        return name.clone();
-                    }
-                }
-            }
-        }
-    }
-    "stain_is_damage".to_string()
+    crux_bridges(dispute)
+        .into_iter()
+        .next()
+        .map(|b| b.predicate)
+        .unwrap_or_else(|| "stain_is_damage".to_string())
 }
 
 /// Names of the claim axioms that feed the over-claim refutation.

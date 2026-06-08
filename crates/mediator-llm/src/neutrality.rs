@@ -2,13 +2,18 @@
 //!
 //! **The problem it solves.**  A prompted model can be told "don't take sides",
 //! but prompting is not a *check*.  This module provides a second, independent
-//! judge (Nova Lite) that reads the mediator's own utterance and asks two
-//! specific questions:
+//! judge (DeepSeek V3.2 — see [`NEUTRALITY_MODEL`]) that reads the mediator's
+//! own utterance and asks two specific questions:
 //!
 //! 1. Does this utterance *decide* the crux — pick a side, declare one party
 //!    right?
 //! 2. Does it *assert* a fact that is not entailed by the certified facts (i.e.,
 //!    does it invent something)?
+//!
+//! The judge is deliberately drawn from a **different provider than the Claude
+//! mediator** (DeepSeek, not Anthropic): a judge that shares the mediator's
+//! lineage inherits its blind spots, so an independent lineage is what makes the
+//! audit a real check rather than a self-graded one.
 //!
 //! If either answer is "yes", the utterance fails the neutrality check and the
 //! caller can suppress it, request a revision, or log it for review.
@@ -40,6 +45,11 @@ use crate::live::{council_formalize_live, normalize_formula, CouncilReading, Liv
 use anyhow::Context;
 use mediator_types::{Formula, Sig};
 use serde::{Deserialize, Serialize};
+
+/// Model id for the neutrality judge. Re-exported from [`crate::live`] so there
+/// is a **single source of truth**: the judge defaults to DeepSeek V3.2, which
+/// is independent of the Claude mediator voice (uncorrelated blind spots).
+pub use crate::live::NEUTRALITY_MODEL;
 
 // ─────────────────────────────── types ──────────────────────────────────
 
@@ -80,12 +90,16 @@ pub struct DeliberationSummary {
     /// Human-readable list of dissenting readings (label + their formula's
     /// normalized form), if any.
     pub dissent_notes: Vec<String>,
+    /// Whether the agreed form is a Condorcet winner (strict pairwise lead over
+    /// every rival). A firmer signal than a bare plurality.
+    pub condorcet_winner: bool,
+    /// Advisory confidence in `[0.0, 1.0]` — vote share lifted by provider
+    /// breadth. The prover remains the only authority; this just lets the
+    /// session distinguish "everyone agreed" from "a bare plurality".
+    pub confidence: f64,
 }
 
 // ──────────────────────────── prompt helpers ─────────────────────────────
-
-/// Model id for the neutrality judge (Nova Lite — cheap and fast).
-pub const NEUTRALITY_MODEL: &str = "amazon.nova-lite-v1:0";
 
 /// Token cap for the verdict call: we need only a small JSON object.
 pub const NEUTRALITY_MAX_TOKENS: i32 = 256;
@@ -371,6 +385,8 @@ pub async fn deliberate(
         consensus: council.consensus,
         unanimous,
         dissent_notes,
+        condorcet_winner: council.condorcet_winner,
+        confidence: council.confidence,
     })
 }
 

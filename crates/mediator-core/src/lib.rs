@@ -21,7 +21,8 @@ use mediator_types::{
 use serde_json::json;
 use std::collections::HashMap;
 
-use codegen::{build_obligations, build_preamble};
+use codegen::{build_obligations, build_preamble, crux_bridges};
+use mediator_types::Crux;
 use receipts::ReceiptChain;
 use render::{formula_to_english, money};
 
@@ -125,6 +126,34 @@ pub fn analyze(
         // The rest hinges on the crux; the headline figure is the
         // crux-does-not-hold world. Honest: it is the *contingent* figure.
         analysis.ledger_refund_cents = Some(refund_wear);
+
+        // Multi-crux: when disputed items name a *controlling crux*, spell out
+        // what each contested question costs on its own. This makes a dispute
+        // with several independent deductions legible — each line is the swing
+        // a single human answer produces, certified by the two-world arithmetic.
+        let n_controlled = dispute
+            .ledger
+            .items
+            .iter()
+            .filter(|i| i.disputed && i.controlling_crux.is_some())
+            .count();
+        if n_controlled > 1 {
+            for item in &dispute.ledger.items {
+                if !item.disputed {
+                    continue;
+                }
+                if let Some(pred) = &item.controlling_crux {
+                    let q = predicate_gloss(dispute, pred)
+                        .unwrap_or_else(|| pred.replace('_', " "));
+                    analysis.ledger_findings.push(format!(
+                        "The {} ({}) stands only if {} — otherwise it falls away.",
+                        item.label.to_lowercase(),
+                        money(item.amount_cents),
+                        q
+                    ));
+                }
+            }
+        }
     } else {
         // Do not overclaim a number the host could not certify.
         analysis
@@ -167,21 +196,96 @@ pub fn analyze(
     }
 
     // ── 4. isolate_crux ─────────────────────────────────────────────────
+    // A real dispute reduces to a *set* of contested questions. For each crux
+    // bridge k we proved `crux_iff_<k>` (the reduction) and asked the host the
+    // predicate both ways (`crux_<k>_holds` / `crux_<k>_fails`). A bridge is a
+    // genuine open crux iff the iff is Proved and BOTH directions are undecided.
+    let bridges = crux_bridges(dispute);
+
+    // Legacy back-compat verdicts (alias the first crux). The seeded single-crux
+    // scenarios are summarized through these exact names, as before.
     let crux_iff_v = v("crux_iff");
     let crux_damage_v = v("crux_is_damage");
     let crux_wear_v = v("crux_is_wear");
+
+    // Per-crux verdict resolvers. Crux 0 is *aliased* by the legacy obligation
+    // names (`crux_iff` / `crux_is_damage` / `crux_is_wear`): a prover that only
+    // returns the legacy names (the seeded scenarios + the in-crate fixtures)
+    // still drives crux 0 identically, while real multi-crux runs get every
+    // bridge via its `_<k>` names. We prefer a *decisive* verdict from either
+    // source (Proved/Refuted/Error beats a defaulted Unknown).
+    let iff_for = |k: usize| -> Verdict {
+        let per = v(&format!("crux_iff_{k}"));
+        if k == 0 { decisive(per, v("crux_iff")) } else { per }
+    };
+    let holds_for = |k: usize| -> Verdict {
+        let per = v(&format!("crux_{k}_holds"));
+        if k == 0 { decisive(per, v("crux_is_damage")) } else { per }
+    };
+    let fails_for = |k: usize| -> Verdict {
+        let per = v(&format!("crux_{k}_fails"));
+        if k == 0 { decisive(per, v("crux_is_wear")) } else { per }
+    };
+
+    // Per-crux verdict detail for the receipt.
+    let mut crux_detail = serde_json::Map::new();
+    for (k, _b) in bridges.iter().enumerate() {
+        crux_detail.insert(format!("crux_iff_{k}"), json!(fmt_verdict(&iff_for(k))));
+        crux_detail.insert(format!("crux_{k}_holds"), json!(fmt_verdict(&holds_for(k))));
+        crux_detail.insert(format!("crux_{k}_fails"), json!(fmt_verdict(&fails_for(k))));
+    }
+    // Keep the legacy keys in the receipt too, for back-compat readers.
+    crux_detail.insert("crux_iff".into(), json!(fmt_verdict(&crux_iff_v)));
+    crux_detail.insert("crux_is_damage".into(), json!(fmt_verdict(&crux_damage_v)));
+    crux_detail.insert("crux_is_wear".into(), json!(fmt_verdict(&crux_wear_v)));
+    crux_detail.insert("n_cruxes".into(), json!(bridges.len()));
     chain.append(
         "isolate_crux",
-        json!({
-            "crux_iff": fmt_verdict(&crux_iff_v),
-            "crux_is_damage": fmt_verdict(&crux_damage_v),
-            "crux_is_wear": fmt_verdict(&crux_wear_v),
-        }),
+        serde_json::Value::Object(crux_detail),
         Some(crux_iff_v.clone()),
     );
 
-    // The kernel only declares a crux when it has *proved the reduction* (the
-    // iff) AND honestly *cannot decide* the predicate either way.
+    // Assemble the certified set of open cruxes.
+    for (k, b) in bridges.iter().enumerate() {
+        let iff_v = iff_for(k);
+        let holds_v = holds_for(k);
+        let fails_v = fails_for(k);
+        let gloss = predicate_gloss(dispute, &b.predicate);
+        if proved(&iff_v) && undecided(&holds_v) && undecided(&fails_v) {
+            let question = match &gloss {
+                Some(g) => format!("Whether {g}."),
+                None => format!("Whether {}.", b.predicate.replace('_', " ")),
+            };
+            analysis.cruxes.push(Crux {
+                predicate: b.predicate.clone(),
+                question,
+                verdict: Verdict::Unknown,
+            });
+            // Each genuinely-open crux is also an irreducible inter-party knot.
+            if let Some(conflict) = predicate_conflict(dispute, &b.predicate, gloss.as_deref()) {
+                analysis.genuine_conflicts.push(conflict);
+            }
+        } else if proved(&holds_v) || proved(&fails_v) {
+            // The host actually settled this one — record it as a *decided*
+            // crux (Proved/Refuted), never silently as open.
+            let decided = if proved(&holds_v) { Verdict::Proved } else { Verdict::Refuted };
+            let question = match &gloss {
+                Some(g) => format!("Whether {g} (settled by the host from the stipulated facts)."),
+                None => format!("Whether {} (settled by the host).", b.predicate.replace('_', " ")),
+            };
+            analysis.cruxes.push(Crux {
+                predicate: b.predicate.clone(),
+                question,
+                verdict: decided,
+            });
+        }
+    }
+
+    // Back-compat single `crux` prose: derived from the FIRST open crux (or the
+    // legacy verdicts when there are no bridges). The seeded scenarios keep the
+    // exact previous wording.
+    let first_open = analysis.cruxes.iter().find(|c| matches!(c.verdict, Verdict::Unknown));
+    let any_decided = analysis.cruxes.iter().any(|c| matches!(c.verdict, Verdict::Proved | Verdict::Refuted));
     if proved(&crux_iff_v) && undecided(&crux_damage_v) && undecided(&crux_wear_v) {
         analysis.crux = Some(match crux_gloss(dispute) {
             Some(g) => format!(
@@ -201,11 +305,37 @@ pub fn analyze(
              is not, in this dispute, the open crux."
                 .to_string(),
         );
+    } else if let Some(c) = first_open {
+        // Multi-crux path with no legacy first crux proved (e.g. >1 bridge where
+        // the legacy alias didn't line up): name the open set honestly.
+        let n = analysis.cruxes.iter().filter(|c| matches!(c.verdict, Verdict::Unknown)).count();
+        analysis.crux = Some(if n == 1 {
+            format!(
+                "The dispute reduces to one open question — {} The kernel cannot, and will \
+                 not, decide it for you.",
+                c.question
+            )
+        } else {
+            format!(
+                "The dispute reduces to {n} open questions, each of which the kernel cannot — \
+                 and will not — decide for you. They are listed above.",
+            )
+        });
+    } else if any_decided {
+        analysis.crux = Some(
+            "The host was able to settle the contested question from the stipulated facts; it \
+             is not, in this dispute, the open crux."
+                .to_string(),
+        );
     }
 
     // ── genuine conflicts: the irreducible knot ─────────────────────────
-    if let Some(conflict) = crux_conflict(dispute) {
-        analysis.genuine_conflicts.push(conflict);
+    // Single-crux fallback: when there are no bridges (no stipulated iff) we
+    // still surface the legacy crux conflict if one exists.
+    if bridges.is_empty() {
+        if let Some(conflict) = crux_conflict(dispute) {
+            analysis.genuine_conflicts.push(conflict);
+        }
     }
 
     // ── 5. fair_division ────────────────────────────────────────────────
@@ -229,6 +359,21 @@ pub fn analyze(
 
 fn proved(v: &Verdict) -> bool {
     matches!(v, Verdict::Proved)
+}
+
+/// Prefer a *decisive* verdict over a defaulted `Unknown`. Used to reconcile a
+/// crux's per-index obligation name with its legacy alias: whichever source the
+/// prover actually answered wins; if both answered, the per-index one is
+/// authoritative (it is passed as `primary`).
+fn decisive(primary: Verdict, fallback: Verdict) -> Verdict {
+    match (&primary, &fallback) {
+        // Primary spoke decisively — trust it.
+        (Verdict::Proved | Verdict::Refuted | Verdict::Error(_), _) => primary,
+        // Primary is Unknown but the alias was decisive — take the alias.
+        (Verdict::Unknown, Verdict::Proved | Verdict::Refuted | Verdict::Error(_)) => fallback,
+        // Both Unknown.
+        _ => primary,
+    }
 }
 
 /// Undecided = the honest "we could not settle it" verdict (Unknown), which for
@@ -317,6 +462,13 @@ fn crux_predicate(dispute: &Dispute) -> Option<String> {
 /// signature declares it. This is what makes the prose dispute-agnostic.
 fn crux_gloss(dispute: &Dispute) -> Option<String> {
     let name = crux_predicate(dispute)?;
+    predicate_gloss(dispute, &name)
+}
+
+/// The plain-English gloss for a *named* predicate, from whichever party's
+/// signature declares it. Used by the multi-crux path so every contested
+/// question gets its own human phrasing.
+fn predicate_gloss(dispute: &Dispute, name: &str) -> Option<String> {
     for p in &dispute.parties {
         for s in &p.signature {
             if s.name == name && !s.gloss.is_empty() {
@@ -331,6 +483,14 @@ fn crux_gloss(dispute: &Dispute) -> Option<String> {
 /// assert `P` and `¬P` over it. Dispute-agnostic — works for any scenario.
 fn crux_conflict(dispute: &Dispute) -> Option<Conflict> {
     let pred = crux_predicate(dispute)?;
+    let gloss = crux_gloss(dispute);
+    predicate_conflict(dispute, &pred, gloss.as_deref())
+}
+
+/// The genuine conflict over a *named* predicate: the two active claims that
+/// assert `P` and `¬P` over it. Dispute-agnostic, and now crux-agnostic —
+/// each contested question gets its own inter-party knot.
+fn predicate_conflict(dispute: &Dispute, pred: &str, gloss: Option<&str>) -> Option<Conflict> {
     let mut pos: Option<&mediator_types::Claim> = None;
     let mut neg: Option<&mediator_types::Claim> = None;
     for c in &dispute.claims {
@@ -338,10 +498,10 @@ fn crux_conflict(dispute: &Dispute) -> Option<Conflict> {
             continue;
         }
         match &c.formula {
-            Formula::Atom(Term::App(n, a)) if a.is_empty() && *n == pred => pos = Some(c),
+            Formula::Atom(Term::App(n, a)) if a.is_empty() && n == pred => pos = Some(c),
             Formula::Not(inner) => {
                 if let Formula::Atom(Term::App(n, a)) = &**inner {
-                    if a.is_empty() && *n == pred {
+                    if a.is_empty() && n == pred {
                         neg = Some(c);
                     }
                 }
@@ -351,7 +511,7 @@ fn crux_conflict(dispute: &Dispute) -> Option<Conflict> {
     }
     match (pos, neg) {
         (Some(p), Some(n)) => {
-            let desc = match crux_gloss(dispute) {
+            let desc = match gloss {
                 Some(g) => format!(
                     "Whether {g} — a real disagreement of fact and judgment, not just \
                      different words."
@@ -453,6 +613,13 @@ mod tests {
         assert!(crux.contains("will not"));
         assert!(crux.contains("ordinary wear"));
 
+        // additive: the single-crux scenario yields exactly one open crux, and
+        // the legacy `crux` is derived from it (back-compat preserved).
+        assert_eq!(a.cruxes.len(), 1);
+        assert_eq!(a.cruxes[0].predicate, "stain_is_damage");
+        assert_eq!(a.cruxes[0].verdict, Verdict::Unknown);
+        assert!(a.cruxes[0].question.to_lowercase().contains("ordinary wear"));
+
         // genuine conflict over stain_is_damage, robin & sam
         assert_eq!(a.genuine_conflicts.len(), 1);
         let c = &a.genuine_conflicts[0];
@@ -514,5 +681,146 @@ mod tests {
         let (a, _) = analyze(&d, &prover, &TestDivider);
         let crux = a.crux.unwrap();
         assert!(crux.contains("not, in this dispute, the open crux"));
+    }
+
+    // ───────────────────────── multi-crux path ──────────────────────────
+
+    fn twocrux() -> Dispute {
+        load_dispute("../../scenarios/twocrux.json").unwrap()
+    }
+
+    /// Verdicts a healthy real-Isabelle run produces for the two-crux scenario:
+    /// both iffs Proved, the over-claim Proved, and EVERY crux predicate left
+    /// Unknown both directions. These are the per-index obligation names.
+    fn twocrux_verdicts() -> HashMap<String, Verdict> {
+        let mut m = HashMap::new();
+        m.insert("refund_damage_world".into(), Verdict::Proved);
+        m.insert("refund_wear_world".into(), Verdict::Proved);
+        m.insert("over_claim_refuted".into(), Verdict::Proved);
+        // legacy alias (crux 0)
+        m.insert("crux_iff".into(), Verdict::Proved);
+        m.insert("crux_is_damage".into(), Verdict::Unknown);
+        m.insert("crux_is_wear".into(), Verdict::Unknown);
+        // per-crux names
+        for k in 0..2 {
+            m.insert(format!("crux_iff_{k}"), Verdict::Proved);
+            m.insert(format!("crux_{k}_holds"), Verdict::Unknown);
+            m.insert(format!("crux_{k}_fails"), Verdict::Unknown);
+        }
+        m
+    }
+
+    #[test]
+    fn codegen_emits_obligations_for_every_crux() {
+        let d = twocrux();
+        let obs = codegen::build_obligations(&d);
+        let names: Vec<&str> = obs.iter().map(|o| o.name.as_str()).collect();
+        // both per-crux bridges are emitted, plus the legacy alias trio
+        for n in [
+            "crux_iff_0", "crux_0_holds", "crux_0_fails",
+            "crux_iff_1", "crux_1_holds", "crux_1_fails",
+            "crux_iff", "crux_is_damage", "crux_is_wear",
+        ] {
+            assert!(names.contains(&n), "missing obligation {n}: {names:?}");
+        }
+        // crux_iff_0 / crux_iff_1 target the two distinct stipulated iffs
+        let g0 = &obs.iter().find(|o| o.name == "crux_iff_0").unwrap().goal;
+        let g1 = &obs.iter().find(|o| o.name == "crux_iff_1").unwrap().goal;
+        assert!(g0.contains("contractor_eats_rework") && g0.contains("kitchen_work_defective"));
+        assert!(g1.contains("homeowner_owes_change_order") && g1.contains("change_order_authorized"));
+        // each iff is proved from its OWN stipulated axiom only
+        assert!(obs.iter().find(|o| o.name == "crux_iff_0").unwrap().proof.contains("stip_0"));
+        assert!(obs.iter().find(|o| o.name == "crux_iff_1").unwrap().proof.contains("stip_1"));
+    }
+
+    #[test]
+    fn two_cruxes_both_certified_and_handed_back() {
+        let d = twocrux();
+        let prover = TestProver { verdicts: twocrux_verdicts() };
+        let (a, receipts) = analyze(&d, &prover, &TestDivider);
+
+        // Both contested questions are reported, each Unknown (handed back).
+        assert_eq!(a.cruxes.len(), 2);
+        let preds: Vec<&str> = a.cruxes.iter().map(|c| c.predicate.as_str()).collect();
+        assert!(preds.contains(&"kitchen_work_defective"));
+        assert!(preds.contains(&"change_order_authorized"));
+        assert!(a.cruxes.iter().all(|c| c.verdict == Verdict::Unknown));
+
+        // Each crux carries its own human question text from the signature gloss.
+        let kitchen = a.cruxes.iter().find(|c| c.predicate == "kitchen_work_defective").unwrap();
+        assert!(kitchen.question.contains("defectively"));
+        let change = a.cruxes.iter().find(|c| c.predicate == "change_order_authorized").unwrap();
+        assert!(change.question.contains("change order"));
+
+        // Two distinct inter-party knots — one per crux.
+        assert_eq!(a.genuine_conflicts.len(), 2);
+
+        // Legacy single `crux` is set from the FIRST crux (back-compat).
+        assert!(a.crux.as_ref().unwrap().contains("will not"));
+
+        // Ledger findings tie each disputed deduction to its controlling crux.
+        assert!(a.ledger_findings.iter().any(|f|
+            f.to_lowercase().contains("cabinetry rework") && f.contains("defectively")));
+        assert!(a.ledger_findings.iter().any(|f|
+            f.to_lowercase().contains("change-order") && f.contains("change order")));
+
+        // The over-claim is still refuted ($9,000 claimed vs $12,000 itemized).
+        assert!(a.dissolved.iter().any(|s| s.contains("not a deception")));
+
+        // Receipt chain intact; isolate_crux records n_cruxes = 2.
+        assert!(receipts::verify_chain(&receipts).is_ok());
+        let iso = receipts.iter().find(|r| r.op == "isolate_crux").unwrap();
+        assert_eq!(iso.detail["n_cruxes"], serde_json::json!(2));
+    }
+
+    #[test]
+    fn one_settled_crux_does_not_hide_the_other_open_one() {
+        // If the host happens to settle crux 1 (e.g. the change order is proved
+        // authorized) but crux 0 stays open, we must report crux 1 as DECIDED
+        // (Proved) and crux 0 as the still-open question — never silently merge.
+        let d = twocrux();
+        let mut v = twocrux_verdicts();
+        v.insert("crux_1_holds".into(), Verdict::Proved);
+        let prover = TestProver { verdicts: v };
+        let (a, _) = analyze(&d, &prover, &TestDivider);
+
+        assert_eq!(a.cruxes.len(), 2);
+        let open: Vec<&Crux> = a.cruxes.iter().filter(|c| c.verdict == Verdict::Unknown).collect();
+        let decided: Vec<&Crux> = a.cruxes.iter().filter(|c| c.verdict == Verdict::Proved).collect();
+        assert_eq!(open.len(), 1);
+        assert_eq!(decided.len(), 1);
+        assert_eq!(open[0].predicate, "kitchen_work_defective");
+        assert_eq!(decided[0].predicate, "change_order_authorized");
+        // The decided crux's question is framed as host-settled, not open.
+        assert!(decided[0].question.contains("settled by the host"));
+    }
+
+    #[test]
+    fn legacy_caches_and_scenarios_still_parse() {
+        // A precomputed analysis cache written before the multi-crux fields must
+        // still deserialize — `cruxes` defaults to empty, nothing breaks.
+        let cache = std::fs::read_to_string("../../scenarios/roommate.analysis.json").unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&cache).unwrap();
+        let a: mediator_types::Analysis =
+            serde_json::from_value(payload["analysis"].clone()).unwrap();
+        assert!(a.cruxes.is_empty(), "missing cruxes must default to empty");
+        assert!(a.crux.is_some(), "legacy crux preserved");
+
+        // A scenario whose ledger items omit `controlling_crux` parses, with the
+        // field defaulting to None (the seeded single-crux scenarios).
+        let d = roommate();
+        assert!(d.ledger.items.iter().all(|i| i.controlling_crux.is_none()));
+
+        // The new two-crux scenario carries the controlling_crux wiring.
+        let tc = twocrux();
+        let controlled: Vec<&str> = tc
+            .ledger
+            .items
+            .iter()
+            .filter_map(|i| i.controlling_crux.as_deref())
+            .collect();
+        assert_eq!(controlled.len(), 2);
+        assert!(controlled.contains(&"kitchen_work_defective"));
+        assert!(controlled.contains(&"change_order_authorized"));
     }
 }
