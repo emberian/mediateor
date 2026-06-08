@@ -1,0 +1,189 @@
+{
+  "title": "Cohabitation & shared-lease pact — Sasha & Ari split the deposit before either moves out",
+  "parties": [
+    "Sasha (leaving the lease)",
+    "Ari (keeping the lease)"
+  ],
+  "declared_predicates": [
+    "damage_beyond_normal_wear",
+    "days_cohabited"
+  ],
+  "obligations": [
+    {
+      "name": "coverage",
+      "verdict": "Proved",
+      "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause)."
+    },
+    {
+      "name": "consistent_0_1",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `settled_clean` and `settled_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `settled_clean` and `brief_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `settled_clean` and `brief_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `settled_damaged` and `brief_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `settled_damaged` and `brief_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `brief_clean` and `brief_damaged` never both fire while demanding conflicting awards."
+    }
+  ],
+  "status": "Certified",
+  "record": {
+    "entries": [
+      {
+        "seq": 0,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "kind": "coverage",
+        "detail": {
+          "receipt_detail": {
+            "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause).",
+            "obligation": "coverage"
+          },
+          "receipt_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "receipt_seq": 0
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 1,
+        "prev_hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "hash": "de34ecd3027578e67a654eb041efdf4fecc8a4169439a755d619b1b283babd25",
+        "kind": "consistent_0_1",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `settled_clean` and `settled_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_1"
+          },
+          "receipt_hash": "980fef38d4c3d7b400e046e406941e2c5da6e4eb4eed0bd5ebf9f67ba5266a50",
+          "receipt_prev_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_seq": 1
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 2,
+        "prev_hash": "de34ecd3027578e67a654eb041efdf4fecc8a4169439a755d619b1b283babd25",
+        "hash": "4516206305e2e56a246ec8f2f70dfc48777858bcb7fa0b4902a082aa25f57e37",
+        "kind": "consistent_0_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `settled_clean` and `brief_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_2"
+          },
+          "receipt_hash": "4a87c304827d59352ed79c2e887759618b5e87bb16bdec5a6fe17c8a0ebd71bf",
+          "receipt_prev_hash": "980fef38d4c3d7b400e046e406941e2c5da6e4eb4eed0bd5ebf9f67ba5266a50",
+          "receipt_seq": 2
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 3,
+        "prev_hash": "4516206305e2e56a246ec8f2f70dfc48777858bcb7fa0b4902a082aa25f57e37",
+        "hash": "50d0d608e75deb8f78506129804ca6b8881f531dd3d18359cb035277747facf4",
+        "kind": "consistent_0_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `settled_clean` and `brief_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_3"
+          },
+          "receipt_hash": "f2ccb8028bd58712fa8756eab5d8d33ef5ae6eff7e196595d65fafc4f4d6cb36",
+          "receipt_prev_hash": "4a87c304827d59352ed79c2e887759618b5e87bb16bdec5a6fe17c8a0ebd71bf",
+          "receipt_seq": 3
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 4,
+        "prev_hash": "50d0d608e75deb8f78506129804ca6b8881f531dd3d18359cb035277747facf4",
+        "hash": "5193f6a376296a9cba61d64115ea177071a0f23818e13c6f7735480349fca001",
+        "kind": "consistent_1_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `settled_damaged` and `brief_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_2"
+          },
+          "receipt_hash": "0fc19af7cbeef2f88e8e1d6bb05c04090927122703ea3a5f06f6707b6fe6159a",
+          "receipt_prev_hash": "f2ccb8028bd58712fa8756eab5d8d33ef5ae6eff7e196595d65fafc4f4d6cb36",
+          "receipt_seq": 4
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 5,
+        "prev_hash": "5193f6a376296a9cba61d64115ea177071a0f23818e13c6f7735480349fca001",
+        "hash": "580f54df3530ff85c534b9350f12862449853c0ac852107a35d913d8be3c8542",
+        "kind": "consistent_1_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `settled_damaged` and `brief_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_3"
+          },
+          "receipt_hash": "bdaf7ce6218afdef4238d3ce725e86425080232046b1d45d0d3fa2c63a839fad",
+          "receipt_prev_hash": "0fc19af7cbeef2f88e8e1d6bb05c04090927122703ea3a5f06f6707b6fe6159a",
+          "receipt_seq": 5
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 6,
+        "prev_hash": "580f54df3530ff85c534b9350f12862449853c0ac852107a35d913d8be3c8542",
+        "hash": "b44301950ad4f2ed23dce82c91f6d5320dca11a87b24cbd91ea4f77ebcee52c7",
+        "kind": "consistent_2_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `brief_clean` and `brief_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_3"
+          },
+          "receipt_hash": "6d331f40ee79f9847d30201247c23948a3fa2792ca66327b266224222d0a2a05",
+          "receipt_prev_hash": "bdaf7ce6218afdef4238d3ce725e86425080232046b1d45d0d3fa2c63a839fad",
+          "receipt_seq": 6
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 7,
+        "prev_hash": "b44301950ad4f2ed23dce82c91f6d5320dca11a87b24cbd91ea4f77ebcee52c7",
+        "hash": "8b1678e01b48ac517fe0f391ab4442e821f2e3ff1bc295e3897744ff48f61485",
+        "kind": "pact_certified",
+        "detail": {
+          "complete": true,
+          "declared_predicates": [
+            "damage_beyond_normal_wear",
+            "days_cohabited"
+          ],
+          "non_contradictory": true,
+          "parties": [
+            "Sasha (leaving the lease)",
+            "Ari (keeping the lease)"
+          ],
+          "scope": "relative to the DECLARED predicate space only",
+          "title": "Cohabitation & shared-lease pact — Sasha & Ari split the deposit before either moves out"
+        },
+        "verdict": null
+      }
+    ],
+    "public_key": "20f193313f089268c841362831d58b845f768d18629286a830ceaa69ef40effb",
+    "signature": "e06acaa20f77b916e7c385d45852f144f63a87390f37491391d461fc862684b5d3675d4d0f369e73fec9d48b7ccb9b71e30670f2fce68ae4e14e3370c252590c"
+  },
+  "scope_note": "Scope (honesty): this certificate is COMPLETE and CONSISTENT *relative to the\nDECLARED predicate space* only. It provably CANNOT detect a missing-but-\nforeseeable predicate nobody named — only a missing COMBINATION of the worlds\nthat were named. A green certificate does NOT imply completeness-in-the-world."
+}

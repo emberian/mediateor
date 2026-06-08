@@ -37,8 +37,23 @@
       "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 90000 } ] }
     },
     {
-      "name": "short",
-      "guard": { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+      "name": "short_clean",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+          { "Not": { "Atom": { "App": ["stain_is_damage", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
+    },
+    {
+      "name": "short_damaged",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+          { "Atom": { "App": ["stain_is_damage", []] } }
+        ]
+      },
       "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
     }
   ]

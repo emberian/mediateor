@@ -1,0 +1,189 @@
+{
+  "title": "Roommate move-out pact — Robin & Sam settle the deposit in advance",
+  "parties": [
+    "Robin (moving out)",
+    "Sam (staying, holds the deposit)"
+  ],
+  "declared_predicates": [
+    "stain_is_damage",
+    "notice_days"
+  ],
+  "obligations": [
+    {
+      "name": "coverage",
+      "verdict": "Proved",
+      "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause)."
+    },
+    {
+      "name": "consistent_0_1",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `short_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `short_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `damaged` and `short_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `damaged` and `short_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `short_clean` and `short_damaged` never both fire while demanding conflicting awards."
+    }
+  ],
+  "status": "Certified",
+  "record": {
+    "entries": [
+      {
+        "seq": 0,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "kind": "coverage",
+        "detail": {
+          "receipt_detail": {
+            "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause).",
+            "obligation": "coverage"
+          },
+          "receipt_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "receipt_seq": 0
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 1,
+        "prev_hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "hash": "0f61534a35ae3efb15484c75cc38375bf23096b911139ff2e8bcee566fdc2f80",
+        "kind": "consistent_0_1",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_1"
+          },
+          "receipt_hash": "5fb1b8d531647913feca3db702dff949a12228498ecfbcbd0ab75edba75f267f",
+          "receipt_prev_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_seq": 1
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 2,
+        "prev_hash": "0f61534a35ae3efb15484c75cc38375bf23096b911139ff2e8bcee566fdc2f80",
+        "hash": "910e965966b779ca04ec1ec59a855e4da73e7773a506d50ef406d498343897da",
+        "kind": "consistent_0_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `short_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_2"
+          },
+          "receipt_hash": "0d89c278ab5329bbcd6a524691fd4bb5d62cbbee107077b711c91857cf13bef9",
+          "receipt_prev_hash": "5fb1b8d531647913feca3db702dff949a12228498ecfbcbd0ab75edba75f267f",
+          "receipt_seq": 2
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 3,
+        "prev_hash": "910e965966b779ca04ec1ec59a855e4da73e7773a506d50ef406d498343897da",
+        "hash": "1836af265b8b0fb9b795cd620ba8869b27e731ae32ba3d142d29670727314781",
+        "kind": "consistent_0_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_3"
+          },
+          "receipt_hash": "0502327c6aae1c02830aeaef5a7953bf6b41e33308ef61e5b9441ddd683f2ad2",
+          "receipt_prev_hash": "0d89c278ab5329bbcd6a524691fd4bb5d62cbbee107077b711c91857cf13bef9",
+          "receipt_seq": 3
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 4,
+        "prev_hash": "1836af265b8b0fb9b795cd620ba8869b27e731ae32ba3d142d29670727314781",
+        "hash": "2a28b31bf5aa1b95089dff50e9c03cde73c2669a44e1705e27eaa05d03c63845",
+        "kind": "consistent_1_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `damaged` and `short_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_2"
+          },
+          "receipt_hash": "e3170706690e7d03134e49ff2b46c98736015a20e49dab668f2da5fdf5bce533",
+          "receipt_prev_hash": "0502327c6aae1c02830aeaef5a7953bf6b41e33308ef61e5b9441ddd683f2ad2",
+          "receipt_seq": 4
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 5,
+        "prev_hash": "2a28b31bf5aa1b95089dff50e9c03cde73c2669a44e1705e27eaa05d03c63845",
+        "hash": "fa28f5dfe32de869abac11b8ba2b771280cdc626750e0fee9981bc68f8828b72",
+        "kind": "consistent_1_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `damaged` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_3"
+          },
+          "receipt_hash": "fadbf529b93f620aaa5db0231ee6272dec11e9009ad4ca2f583d7afb44a102ab",
+          "receipt_prev_hash": "e3170706690e7d03134e49ff2b46c98736015a20e49dab668f2da5fdf5bce533",
+          "receipt_seq": 5
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 6,
+        "prev_hash": "fa28f5dfe32de869abac11b8ba2b771280cdc626750e0fee9981bc68f8828b72",
+        "hash": "3ccc099a2bbefc569a732b7465f410d2fa63211e5f277f8a979790cd5a0474be",
+        "kind": "consistent_2_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `short_clean` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_3"
+          },
+          "receipt_hash": "918e306402087d6d3c7a1b4f21285643f5f88daf4dcec4c46997298d12e0cbaa",
+          "receipt_prev_hash": "fadbf529b93f620aaa5db0231ee6272dec11e9009ad4ca2f583d7afb44a102ab",
+          "receipt_seq": 6
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 7,
+        "prev_hash": "3ccc099a2bbefc569a732b7465f410d2fa63211e5f277f8a979790cd5a0474be",
+        "hash": "37d34671df8cc7757151969a1ae4de8d4831c3509e0ade9f719c622b2c2beff2",
+        "kind": "pact_certified",
+        "detail": {
+          "complete": true,
+          "declared_predicates": [
+            "stain_is_damage",
+            "notice_days"
+          ],
+          "non_contradictory": true,
+          "parties": [
+            "Robin (moving out)",
+            "Sam (staying, holds the deposit)"
+          ],
+          "scope": "relative to the DECLARED predicate space only",
+          "title": "Roommate move-out pact — Robin & Sam settle the deposit in advance"
+        },
+        "verdict": null
+      }
+    ],
+    "public_key": "20f193313f089268c841362831d58b845f768d18629286a830ceaa69ef40effb",
+    "signature": "62bd5f0a53a20355c2997bbf66e0961a38d69fb7272f4c5d0479876de7bafea4954cecaf1b6c0f4d8a319ea9f9d50cba8144b5d5aaca4cd7dbf16d0454cba909"
+  },
+  "scope_note": "Scope (honesty): this certificate is COMPLETE and CONSISTENT *relative to the\nDECLARED predicate space* only. It provably CANNOT detect a missing-but-\nforeseeable predicate nobody named — only a missing COMBINATION of the worlds\nthat were named. A green certificate does NOT imply completeness-in-the-world."
+}

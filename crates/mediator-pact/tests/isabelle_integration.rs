@@ -6,8 +6,11 @@
 //!
 //!   * `scenarios/pacts/roommate_moveout.json` (COMPLETE, consistent) →
 //!     coverage Proved AND every consistency Proved → CERTIFIED, signed.
-//!   * `scenarios/pacts/roommate_moveout_broken.json` (short clause dropped) →
+//!   * `scenarios/pacts/roommate_moveout_broken.json` (short clauses dropped) →
 //!     coverage NOT Proved → REFUSED, with the uncovered world named.
+//!   * `scenarios/pacts/roommate_overlap_inconsistent.json` (COMPLETE but two
+//!     clauses overlap with different awards) → a consistency obligation
+//!     Unknown → INCONSISTENT, with the concrete witness world exhibited.
 //!
 //! Gated EXACTLY the way `mediator-core`'s real-Isabelle test is gated: it
 //! checks the `isabelle` binary exists and returns early (skips) if not, builds
@@ -73,8 +76,9 @@ fn complete_pact_certifies_through_real_isabelle() {
         mediator_audit::verify(&cert.record).is_ok(),
         "signed certificate record must verify"
     );
-    // One receipt per obligation (coverage + 3 pairs) + the certification event.
-    assert_eq!(cert.record.entries.len(), 4 + 1);
+    // One receipt per obligation (coverage + 6 pairs, the 4 crux-aware clauses)
+    // + the certification event.
+    assert_eq!(cert.record.entries.len(), 7 + 1);
     assert_eq!(cert.record.entries.last().unwrap().kind, "pact_certified");
 
     eprintln!("\n{}", cert.render());
@@ -148,12 +152,89 @@ fn broken_pact_is_refused_through_real_isabelle() {
                 gap.plain
             );
         }
-        Status::Certified => panic!("broken pact must NOT certify"),
+        other => panic!("broken pact must be REFUSED for a coverage gap, got {other:?}"),
     }
 
     // The refusal is recorded in the signed, verifiable chain too.
     assert!(mediator_audit::verify(&cert.record).is_ok());
     assert_eq!(cert.record.entries.last().unwrap().kind, "pact_refused");
+
+    eprintln!("\n{}", cert.render());
+}
+
+/// The COMPLETE-but-INCONSISTENT pact, through the REAL gate: coverage Proved,
+/// but a consistency obligation comes back Unknown (two clauses genuinely
+/// overlap and demand different awards). The crate then EXHIBITS the concrete
+/// witness world — the third trichotomy leg — and the witness re-checks without
+/// Isabelle. The signed record carries it as `pact_inconsistent`.
+#[test]
+fn inconsistent_pact_witnessed_through_real_isabelle() {
+    if !PathBuf::from(ISABELLE).exists() {
+        eprintln!("skipping: isabelle not found at {ISABELLE}");
+        return;
+    }
+
+    let pact = load("scenarios/pacts/roommate_overlap_inconsistent.json");
+
+    let prover = IsabelleProver::new(ISABELLE).with_timeout(Duration::from_secs(180));
+    let cert = certify_pact(&pact, &prover);
+
+    for o in &cert.obligations {
+        eprintln!("obligation {:<22} -> {:?}", o.name, o.verdict);
+        assert!(
+            !matches!(o.verdict, Verdict::Error(_)),
+            "obligation {} produced invalid Isabelle / errored: {:?}",
+            o.name,
+            o.verdict
+        );
+    }
+
+    // Coverage must hold (the pact IS complete — every world fires something).
+    let coverage = cert
+        .obligations
+        .iter()
+        .find(|o| o.name == "coverage")
+        .expect("a coverage obligation");
+    assert_eq!(
+        coverage.verdict,
+        Verdict::Proved,
+        "the inconsistent pact is still COMPLETE"
+    );
+
+    // At least one consistency obligation must NOT close (the real clash).
+    assert!(
+        cert.obligations
+            .iter()
+            .any(|o| o.name.starts_with("consistent_") && o.verdict == Verdict::Unknown),
+        "a consistency pair must be Unknown (the overlap)"
+    );
+
+    // Overall INCONSISTENT, with the concrete, re-checkable witness world.
+    match &cert.status {
+        Status::Inconsistent { witness } => {
+            // `late_penalty_overlap` (clause 2) overlaps `clean` (0) and
+            // `damaged` (1); the first failing pair in emission order is
+            // (0, 2). The witness fires both at notice ≥ 30.
+            assert!(*witness.int_assignment.get("notice_days").unwrap() >= 30);
+            assert_ne!(
+                witness.award_i_cents, witness.award_j_cents,
+                "a clash is two different awards"
+            );
+            // It re-verifies with no Isabelle.
+            assert!(
+                mediator_pact::recheck_witness(&pact, witness),
+                "the exhibited witness must re-check independently"
+            );
+        }
+        other => panic!("expected INCONSISTENT with a witness, got {other:?}"),
+    }
+
+    // The inconsistency is in the signed, verifiable chain, carrying the witness.
+    assert!(mediator_audit::verify(&cert.record).is_ok());
+    assert_eq!(
+        cert.record.entries.last().unwrap().kind,
+        "pact_inconsistent"
+    );
 
     eprintln!("\n{}", cert.render());
 }

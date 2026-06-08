@@ -1,5 +1,5 @@
 {
-  "title": "Roommate move-out pact (BROKEN) — the short-notice clauses were dropped",
+  "title": "Roommate move-out pact (INCONSISTENT) — two clauses overlap and demand different refunds",
   "parties": ["Robin (moving out)", "Sam (staying, holds the deposit)"],
   "predicates": [
     {
@@ -35,6 +35,39 @@
         ]
       },
       "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 90000 } ] }
+    },
+    {
+      "name": "late_penalty_overlap",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 30 }, { "App": ["notice_days", []] } ] },
+          { "Or": [
+            { "Atom": { "App": ["stain_is_damage", []] } },
+            { "Not": { "Atom": { "App": ["stain_is_damage", []] } } }
+          ] }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
+    },
+    {
+      "name": "short_clean",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+          { "Not": { "Atom": { "App": ["stain_is_damage", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
+    },
+    {
+      "name": "short_damaged",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["notice_days", []] }, { "IntLit": 30 } ] },
+          { "Atom": { "App": ["stain_is_damage", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
     }
   ]
 }

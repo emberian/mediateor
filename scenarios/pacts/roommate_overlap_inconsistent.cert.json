@@ -1,0 +1,305 @@
+{
+  "title": "Roommate move-out pact (INCONSISTENT) — two clauses overlap and demand different refunds",
+  "parties": [
+    "Robin (moving out)",
+    "Sam (staying, holds the deposit)"
+  ],
+  "declared_predicates": [
+    "stain_is_damage",
+    "notice_days"
+  ],
+  "obligations": [
+    {
+      "name": "coverage",
+      "verdict": "Proved",
+      "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause)."
+    },
+    {
+      "name": "consistent_0_1",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_2",
+      "verdict": "Unknown",
+      "describes": "CONSISTENCY: clauses `clean` and `late_penalty_overlap` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `short_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_4",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `clean` and `short_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_2",
+      "verdict": "Unknown",
+      "describes": "CONSISTENCY: clauses `damaged` and `late_penalty_overlap` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `damaged` and `short_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_4",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `damaged` and `short_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `late_penalty_overlap` and `short_clean` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_4",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `late_penalty_overlap` and `short_damaged` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_3_4",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `short_clean` and `short_damaged` never both fire while demanding conflicting awards."
+    }
+  ],
+  "status": {
+    "Inconsistent": {
+      "witness": {
+        "clause_i": 0,
+        "clause_j": 2,
+        "clause_i_name": "clean",
+        "clause_j_name": "late_penalty_overlap",
+        "bool_assignment": {
+          "stain_is_damage": false
+        },
+        "int_assignment": {
+          "notice_days": 30
+        },
+        "award_i_cents": 120000,
+        "award_j_cents": 100000
+      }
+    }
+  },
+  "record": {
+    "entries": [
+      {
+        "seq": 0,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "kind": "coverage",
+        "detail": {
+          "receipt_detail": {
+            "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause).",
+            "obligation": "coverage"
+          },
+          "receipt_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "receipt_seq": 0
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 1,
+        "prev_hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "hash": "0f61534a35ae3efb15484c75cc38375bf23096b911139ff2e8bcee566fdc2f80",
+        "kind": "consistent_0_1",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_1"
+          },
+          "receipt_hash": "5fb1b8d531647913feca3db702dff949a12228498ecfbcbd0ab75edba75f267f",
+          "receipt_prev_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_seq": 1
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 2,
+        "prev_hash": "0f61534a35ae3efb15484c75cc38375bf23096b911139ff2e8bcee566fdc2f80",
+        "hash": "ca7b6251f8168c6a35e8e941aa1a07c5e3a3e3d063672960a8b2d7dbc0f5d097",
+        "kind": "consistent_0_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `late_penalty_overlap` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_2"
+          },
+          "receipt_hash": "8c72a853424aa06353805251e9134cfb7499efb8110f4b499f634b129d1a5dfe",
+          "receipt_prev_hash": "5fb1b8d531647913feca3db702dff949a12228498ecfbcbd0ab75edba75f267f",
+          "receipt_seq": 2
+        },
+        "verdict": "Unknown"
+      },
+      {
+        "seq": 3,
+        "prev_hash": "ca7b6251f8168c6a35e8e941aa1a07c5e3a3e3d063672960a8b2d7dbc0f5d097",
+        "hash": "c57b3addba9d1dcee271986e0bd4dbd4280736d9b3249c432461702a4dd9fadb",
+        "kind": "consistent_0_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `short_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_3"
+          },
+          "receipt_hash": "4f680698d5cc330e02f238cadcc2a2967b52c4dd71f83e6064b8c068d839acbd",
+          "receipt_prev_hash": "8c72a853424aa06353805251e9134cfb7499efb8110f4b499f634b129d1a5dfe",
+          "receipt_seq": 3
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 4,
+        "prev_hash": "c57b3addba9d1dcee271986e0bd4dbd4280736d9b3249c432461702a4dd9fadb",
+        "hash": "9de47b55cd9c52a3ea934189bec9569d3ca5d6bb44ad6abcce9c977aa0c7fdf4",
+        "kind": "consistent_0_4",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `clean` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_4"
+          },
+          "receipt_hash": "c0e138fbd5a6d019775464a7a5ec265bc3325d4c3895ed5ae698315e12a13d4a",
+          "receipt_prev_hash": "4f680698d5cc330e02f238cadcc2a2967b52c4dd71f83e6064b8c068d839acbd",
+          "receipt_seq": 4
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 5,
+        "prev_hash": "9de47b55cd9c52a3ea934189bec9569d3ca5d6bb44ad6abcce9c977aa0c7fdf4",
+        "hash": "b69c97c3ac3f97a7d7ab8f0fec745a0f7bf5d69deb0fb1a1c71cb6195ee81c74",
+        "kind": "consistent_1_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `damaged` and `late_penalty_overlap` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_2"
+          },
+          "receipt_hash": "546ca86bbf8728e6f053a6a41906be102e1eb6f250c8d60f6442c52fc23e6dde",
+          "receipt_prev_hash": "c0e138fbd5a6d019775464a7a5ec265bc3325d4c3895ed5ae698315e12a13d4a",
+          "receipt_seq": 5
+        },
+        "verdict": "Unknown"
+      },
+      {
+        "seq": 6,
+        "prev_hash": "b69c97c3ac3f97a7d7ab8f0fec745a0f7bf5d69deb0fb1a1c71cb6195ee81c74",
+        "hash": "0cf619c1771f81cc8ec218da283202a6801a222f26a2b7688c81d32a2556dc76",
+        "kind": "consistent_1_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `damaged` and `short_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_3"
+          },
+          "receipt_hash": "09c6e48bd5ccbe4d8ff89894f8f263a9055e1bdb59590fdf1cf10ee165c2d51e",
+          "receipt_prev_hash": "546ca86bbf8728e6f053a6a41906be102e1eb6f250c8d60f6442c52fc23e6dde",
+          "receipt_seq": 6
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 7,
+        "prev_hash": "0cf619c1771f81cc8ec218da283202a6801a222f26a2b7688c81d32a2556dc76",
+        "hash": "d9b012b29687f0f0553d8a59d764c57727ff2473d34bd8e946b3e3f959cc6692",
+        "kind": "consistent_1_4",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `damaged` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_4"
+          },
+          "receipt_hash": "4100cba44a5fbd8ef6df5a402cc478cd8c89653e00fd666a4db6c9e61932e6dd",
+          "receipt_prev_hash": "09c6e48bd5ccbe4d8ff89894f8f263a9055e1bdb59590fdf1cf10ee165c2d51e",
+          "receipt_seq": 7
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 8,
+        "prev_hash": "d9b012b29687f0f0553d8a59d764c57727ff2473d34bd8e946b3e3f959cc6692",
+        "hash": "f6181df938e744362f21d6dd53705a5f8579574f9e0a37024491720e666082c5",
+        "kind": "consistent_2_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `late_penalty_overlap` and `short_clean` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_3"
+          },
+          "receipt_hash": "ad8636edcc0f8198d362383520dc0ffbf03419306b7a7b6353757426f4c0fda9",
+          "receipt_prev_hash": "4100cba44a5fbd8ef6df5a402cc478cd8c89653e00fd666a4db6c9e61932e6dd",
+          "receipt_seq": 8
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 9,
+        "prev_hash": "f6181df938e744362f21d6dd53705a5f8579574f9e0a37024491720e666082c5",
+        "hash": "ac3146fe26a42eae51e6a5df04f0fc0310a3e2786b17c1558d57b76dce102e84",
+        "kind": "consistent_2_4",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `late_penalty_overlap` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_4"
+          },
+          "receipt_hash": "35a6fe8199c35d9877f8cda42ca0cb8d19871e0ef780ee45c3d6935e79232aa6",
+          "receipt_prev_hash": "ad8636edcc0f8198d362383520dc0ffbf03419306b7a7b6353757426f4c0fda9",
+          "receipt_seq": 9
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 10,
+        "prev_hash": "ac3146fe26a42eae51e6a5df04f0fc0310a3e2786b17c1558d57b76dce102e84",
+        "hash": "acbd6609f3581a5d49f91cd4870052bcd614bbf550346c1f65b58c69d55ee72b",
+        "kind": "consistent_3_4",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `short_clean` and `short_damaged` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_3_4"
+          },
+          "receipt_hash": "b787c506d7f01e667c5426daa073be4e6e442a5cb7aeba88b50a79813eafce4d",
+          "receipt_prev_hash": "35a6fe8199c35d9877f8cda42ca0cb8d19871e0ef780ee45c3d6935e79232aa6",
+          "receipt_seq": 10
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 11,
+        "prev_hash": "acbd6609f3581a5d49f91cd4870052bcd614bbf550346c1f65b58c69d55ee72b",
+        "hash": "71cd1adfbba099ecd856862649134104ec14757a1f41b5b6300d749a009ac096",
+        "kind": "pact_inconsistent",
+        "detail": {
+          "complete": true,
+          "declared_predicates": [
+            "stain_is_damage",
+            "notice_days"
+          ],
+          "non_contradictory": false,
+          "parties": [
+            "Robin (moving out)",
+            "Sam (staying, holds the deposit)"
+          ],
+          "scope": "relative to the DECLARED predicate space only",
+          "title": "Roommate move-out pact (INCONSISTENT) — two clauses overlap and demand different refunds",
+          "witness": {
+            "award_i_cents": 120000,
+            "award_j_cents": 100000,
+            "bool_assignment": {
+              "stain_is_damage": false
+            },
+            "clause_i": 0,
+            "clause_i_name": "clean",
+            "clause_j": 2,
+            "clause_j_name": "late_penalty_overlap",
+            "int_assignment": {
+              "notice_days": 30
+            }
+          },
+          "witness_plain": "INCONSISTENT: when stain_is_damage is false and notice_days = 30, clauses `clean` and `late_penalty_overlap` both fire and demand 120000 vs 100000 (cents). A contradiction of numbers — the pact would owe two different amounts at once."
+        },
+        "verdict": null
+      }
+    ],
+    "public_key": "20f193313f089268c841362831d58b845f768d18629286a830ceaa69ef40effb",
+    "signature": "4675af2e4b428c9f759bcabe13064c8303fa7cbee120303306d2a0bc645e413a8d48d21f15e74d647d083d04dcc74c8a9b211a8fc87cb137a88b2a445b4caf0c"
+  },
+  "scope_note": "Scope (honesty): this certificate is COMPLETE and CONSISTENT *relative to the\nDECLARED predicate space* only. It provably CANNOT detect a missing-but-\nforeseeable predicate nobody named — only a missing COMBINATION of the worlds\nthat were named. A green certificate does NOT imply completeness-in-the-world."
+}

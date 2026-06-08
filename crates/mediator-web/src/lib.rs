@@ -14,6 +14,7 @@
 //! hash-chained receipt ledger — provenance you can point at.
 
 mod load;
+mod pacts;
 mod theme;
 
 use std::collections::{HashMap, HashSet};
@@ -243,6 +244,11 @@ impl LoadedDispute {
 /// What the server renders from. Holds many disputes; decoupled from the kernel.
 pub struct AppState {
     pub disputes: Vec<LoadedDispute>,
+    /// The certified FORWARD CONSTITUTIONS corpus: each pact + the CACHED, signed
+    /// certificate the anchor worker proved through the real gate. This box only
+    /// renders them — it never runs Isabelle. May be empty (the gallery shows a
+    /// calm empty state then).
+    pub pacts: Vec<pacts::PactRecord>,
     /// Whether the live LLM feature is enabled (env `MEDIATEOR_LIVE_LLM`).
     pub live_llm_enabled: bool,
     /// Global + per-IP rate limiter guarding every model-calling endpoint.
@@ -285,8 +291,13 @@ impl AppState {
             .and_then(|v| v.parse().ok())
             .filter(|v: &usize| *v >= 40)
             .unwrap_or(600);
+        // The certified-pact corpus (renders the CACHED certs; never runs the gate).
+        // Discovered beside the scenarios, under `scenarios/pacts/`. Missing/empty
+        // is fine — the gallery shows a calm empty state.
+        let pacts = pacts::discover_pacts(&pacts::pacts_dir());
         Self {
             disputes,
+            pacts,
             live_llm_enabled,
             rate_limiter: RateLimiter::new(RateConfig::from_env()),
             max_input_chars,
@@ -309,6 +320,15 @@ impl AppState {
     #[cfg(test)]
     fn with_rate_config(mut self, cfg: RateConfig) -> Self {
         self.rate_limiter = RateLimiter::new(cfg);
+        self
+    }
+
+    /// Test-only: install an explicit certified-pact corpus, so the forward-
+    /// constitution routes can be exercised on deterministic fixtures rather than
+    /// whatever happens to sit on disk.
+    #[cfg(test)]
+    fn with_pacts(mut self, pacts: Vec<pacts::PactRecord>) -> Self {
+        self.pacts = pacts;
         self
     }
 }
@@ -378,6 +398,8 @@ pub fn router(state: AppState) -> Router {
         .route("/talk/:sid/:party_id/sign", post(talk_sign))
         .route("/audit/:dispute_id", get(audit_view))
         .route("/audit/:dispute_id/download", get(audit_download))
+        .route("/pacts", get(pacts::pacts_gallery))
+        .route("/pact/:id", get(pacts::pact_detail))
         .route(
             "/settlement/:dispute_id/:idx/accept",
             post(settlement_accept),
@@ -1674,12 +1696,19 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
                 "what was never really the fight, and hands the one honest question "
                 "back to you. Nothing is decided for you."
             }
-            @if let Some(first) = state.disputes.first() {
-                @let first_party = first.dispute.parties.first().map(|p| p.id.clone()).unwrap_or_default();
+            @if !state.disputes.is_empty() || !state.pacts.is_empty() {
                 div .hero-cta {
                     style { (PreEscaped(".hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;justify-content:center;margin-top:1.4rem}.hero-cta a{padding:.66rem 1.15rem;border-radius:12px;text-decoration:none;font-weight:600}.cta-primary{background:var(--accent);color:#fff}.cta-primary:hover{background:var(--accent-2)}.cta-secondary{border:1px solid var(--border-2);color:inherit}.cta-secondary:hover{background:var(--bg-2)}")) }
-                    a .cta-primary href=(format!("/talk/{}/{}", first.id, first_party)) { "Enter the room →" }
-                    a .cta-secondary href=(format!("/session/{}", first.id)) { "Or watch a full mediation" }
+                    @if let Some(first) = state.disputes.first() {
+                        @let first_party = first.dispute.parties.first().map(|p| p.id.clone()).unwrap_or_default();
+                        a .cta-primary href=(format!("/talk/{}/{}", first.id, first_party)) { "Enter the room →" }
+                        a .cta-secondary href=(format!("/session/{}", first.id)) { "Or watch a full mediation" }
+                    }
+                    @if !state.pacts.is_empty() {
+                        // The pact CTA is the primary call when no disputes are loaded.
+                        @let cls = if state.disputes.is_empty() { "cta-primary" } else { "cta-secondary" };
+                        a .(cls) href="/pacts" { "Settle it in advance" }
+                    }
                 }
             }
         }
@@ -1723,6 +1752,24 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
                             span .case-go { "open →" }
                         }
                     }
+                }
+            }
+        }
+
+        // The forward-constitutions invite sits beside the live room regardless of
+        // whether any disputes are loaded — it's a door of its own.
+        @if !state.pacts.is_empty() {
+            section .forward-invite {
+                style { (PreEscaped(".forward-invite{margin-top:1.6rem}.forward-invite .fwd-card{display:block;color:inherit;background:var(--bg-2);border:1.5px solid var(--border);border-style:dashed;border-radius:var(--radius);padding:1.4rem 1.5rem;box-shadow:var(--shadow);transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.forward-invite .fwd-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:var(--shadow-lg);text-decoration:none}.fwd-eyebrow{font-size:var(--t--1);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}.fwd-title{font-family:var(--serif);font-size:var(--t-2);font-weight:600;letter-spacing:-.01em;margin-top:.3rem}.fwd-blurb{color:var(--text-2);margin-top:.5rem}.fwd-go{display:inline-block;margin-top:.8rem;color:var(--accent);font-weight:600;font-size:var(--t--1)}")) }
+                a .fwd-card href="/pacts" {
+                    div .fwd-eyebrow { "before the dispute" }
+                    h2 .fwd-title { "Forward constitutions" }
+                    p .fwd-blurb {
+                        "Or don't wait for the fight at all. Settle, in advance, how every "
+                        "situation you can name will be handled — and prove the agreement "
+                        "holds before anyone needs it."
+                    }
+                    span .fwd-go { "see the certified pacts →" }
                 }
             }
         }

@@ -1,0 +1,60 @@
+{
+  "title": "Creative collaboration & credit pact — Mara & Devon settle the credit line before release",
+  "parties": ["Mara (lead author)", "Devon (collaborator)"],
+  "predicates": [
+    {
+      "name": "substantial_creative_contribution",
+      "arg_sorts": [],
+      "ret": "Bool",
+      "gloss": "whether Devon's input was a substantial *creative* contribution (shaping the work) rather than skilled execution of Mara's direction — the contested future crux (the fight under the fight is recognition), left uninterpreted"
+    },
+    {
+      "name": "hours_logged",
+      "arg_sorts": [],
+      "ret": "Int",
+      "gloss": "how many hours Devon logged on the project — an agreed, measurable integer (the 100-hour threshold is stipulated). The outcome `award` is Devon's royalty share in basis points (bps)."
+    }
+  ],
+  "clauses": [
+    {
+      "name": "co_creator",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 100 }, { "App": ["hours_logged", []] } ] },
+          { "Atom": { "App": ["substantial_creative_contribution", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 5000 } ] }
+    },
+    {
+      "name": "credited_contributor",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 100 }, { "App": ["hours_logged", []] } ] },
+          { "Not": { "Atom": { "App": ["substantial_creative_contribution", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 2000 } ] }
+    },
+    {
+      "name": "co_creator_light",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["hours_logged", []] }, { "IntLit": 100 } ] },
+          { "Atom": { "App": ["substantial_creative_contribution", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 3000 } ] }
+    },
+    {
+      "name": "assistant_credit",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["hours_logged", []] }, { "IntLit": 100 } ] },
+          { "Not": { "Atom": { "App": ["substantial_creative_contribution", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 500 } ] }
+    }
+  ]
+}

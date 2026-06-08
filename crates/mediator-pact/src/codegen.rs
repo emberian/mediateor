@@ -320,13 +320,11 @@ pub fn consistency_obligations(pact: &Pact) -> Vec<Obligation> {
             let oj = outcome_applied(j, cj);
 
             let goal = format!("\\<not> ({gi} \\<and> {gj} \\<and> {oi} \\<and> \\<not> {oj})");
-            let proof = format!(
-                "by (auto simp: {} {} {} {})",
-                format!("{}_def", guard_def_name(i, ci)),
-                format!("{}_def", guard_def_name(j, cj)),
-                format!("{}_def", outcome_def_name(i, ci)),
-                format!("{}_def", outcome_def_name(j, cj)),
-            );
+            let gi_def = format!("{}_def", guard_def_name(i, ci));
+            let gj_def = format!("{}_def", guard_def_name(j, cj));
+            let oi_def = format!("{}_def", outcome_def_name(i, ci));
+            let oj_def = format!("{}_def", outcome_def_name(j, cj));
+            let proof = format!("by (auto simp: {gi_def} {gj_def} {oi_def} {oj_def})");
             obs.push(Obligation {
                 name: consistency_obligation_name(i, j),
                 goal,

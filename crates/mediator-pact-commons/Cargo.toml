@@ -1,0 +1,21 @@
+[package]
+name = "mediator-pact-commons"
+version = "0.1.0"
+edition = { workspace = true }
+license = { workspace = true }
+description = "The COMMONS OF PACTS: case law without a sovereign, with signal — because pacts of one TEMPLATE share a declared vocabulary and so COLLIDE by construction. A deterministic template key, a certified-controversy tally (the DISTRIBUTION of awards people chose at a structurally-identical decision point, all signed, never 'yours should be X'), re-verifiable with no trust in the commons and no AI; the corpus size is the headline, an error bar not a checkmark."
+
+[[bin]]
+name = "pact-commons"
+path = "src/bin/pact_commons.rs"
+
+[dependencies]
+mediator-types = { workspace = true }
+mediator-audit = { workspace = true }
+mediator-pact = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+anyhow = { workspace = true }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"

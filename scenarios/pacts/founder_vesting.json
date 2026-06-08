@@ -1,0 +1,60 @@
+{
+  "title": "Founder vesting pact — Avery & Quinn fix the cliff and the for-cause question in advance",
+  "parties": ["Avery (founder who may depart)", "Quinn (co-founder who stays)"],
+  "predicates": [
+    {
+      "name": "departure_for_cause",
+      "arg_sorts": [],
+      "ret": "Bool",
+      "gloss": "whether Avery's departure was 'for cause' (misconduct / breach) rather than an ordinary parting — the contested future crux, left uninterpreted"
+    },
+    {
+      "name": "months_served",
+      "arg_sorts": [],
+      "ret": "Int",
+      "gloss": "how many months Avery served before departing — an agreed, measurable integer (the 12-month cliff is stipulated). The outcome `award` is vested equity in basis points (bps)."
+    }
+  ],
+  "clauses": [
+    {
+      "name": "pre_cliff_clean",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["months_served", []] }, { "IntLit": 12 } ] },
+          { "Not": { "Atom": { "App": ["departure_for_cause", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 0 } ] }
+    },
+    {
+      "name": "pre_cliff_for_cause",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["months_served", []] }, { "IntLit": 12 } ] },
+          { "Atom": { "App": ["departure_for_cause", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 0 } ] }
+    },
+    {
+      "name": "vested_not_for_cause",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 12 }, { "App": ["months_served", []] } ] },
+          { "Not": { "Atom": { "App": ["departure_for_cause", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 2500 } ] }
+    },
+    {
+      "name": "vested_for_cause_forfeit",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 12 }, { "App": ["months_served", []] } ] },
+          { "Atom": { "App": ["departure_for_cause", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 0 } ] }
+    }
+  ]
+}
