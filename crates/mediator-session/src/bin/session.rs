@@ -4,7 +4,7 @@
 //!
 //!     cargo run -p mediator-session --bin session -- scenarios/roommate.json
 
-use mediator_session::{conduct, render_transcript, ScriptedBrain, ScriptedInputs, Session};
+use mediator_session::{conduct, render_transcript, LiveBrain, ScriptedBrain, ScriptedInputs, Session};
 
 fn main() -> anyhow::Result<()> {
     let path = std::env::args()
@@ -41,7 +41,22 @@ fn main() -> anyhow::Result<()> {
         inp
     };
 
-    let out = conduct(session, &ScriptedBrain, &inputs);
+    // MEDIATEOR_LIVE_MEDIATOR=1 → the model conducts the session (Bedrock);
+    // otherwise the deterministic scripted voice.
+    let out = if std::env::var("MEDIATEOR_LIVE_MEDIATOR").is_ok() {
+        match LiveBrain::new() {
+            Ok(b) => {
+                eprintln!("☄ live mediator ({})\n", mediator_session::DEFAULT_MEDIATOR_MODEL);
+                conduct(session, &b, &inputs)
+            }
+            Err(e) => {
+                eprintln!("⚠ live brain init failed ({e}); using scripted voice");
+                conduct(session, &ScriptedBrain, &inputs)
+            }
+        }
+    } else {
+        conduct(session, &ScriptedBrain, &inputs)
+    };
     println!("{}", render_transcript(&out));
     Ok(())
 }

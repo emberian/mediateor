@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 mediator-types = { workspace = true }
 mediator-core = { workspace = true }
+mediator-llm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
