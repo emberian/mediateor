@@ -9,6 +9,6 @@ mediator-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-# the string-diagram substrate (pushout = coequalizer of coproduct); optional —
-# fall back to a local structural representation if its API is awkward.
-open-hypergraphs = { path = "/Users/ember/hellas/open-hypergraphs" }
+# the string-diagram substrate (pushout = coequalizer of coproduct). Published
+# crate (not a local path) so the workspace is portable to the deploy box.
+open-hypergraphs = "0.3"
