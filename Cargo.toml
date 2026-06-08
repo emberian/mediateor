@@ -11,7 +11,6 @@ members = [
     "crates/mediator-session",
     "crates/mediator-audit",
     "crates/mediator-ontology",
-    "crates/mediator-commons",
     "crates/mediator-demo",
     "crates/mediator-pact",
     "crates/mediator-pact-commons",
@@ -31,7 +30,6 @@ mediator-tui = { path = "crates/mediator-tui" }
 mediator-session = { path = "crates/mediator-session" }
 mediator-audit = { path = "crates/mediator-audit" }
 mediator-ontology = { path = "crates/mediator-ontology" }
-mediator-commons = { path = "crates/mediator-commons" }
 mediator-pact = { path = "crates/mediator-pact" }
 mediator-pact-commons = { path = "crates/mediator-pact-commons" }
 serde = { version = "1", features = ["derive"] }
