@@ -266,10 +266,15 @@ fn crux_iff_goal(dispute: &Dispute) -> String {
 /// stipulated lease iff (e.g. `stain_is_damage`).
 fn crux_predicate_name(dispute: &Dispute) -> String {
     for f in &dispute.stipulated {
-        if let Formula::Iff(_, rhs) = f {
-            if let Formula::Atom(Term::App(name, args)) = &**rhs {
-                if args.is_empty() {
-                    return name.clone();
+        if let Formula::Iff(lhs, rhs) = f {
+            // The crux is whichever side of the bridge is a bare nullary predicate
+            // (the contested fact); the other side may be negated or complex (the
+            // obligation it controls). Prefer the right side for back-compat.
+            for side in [rhs, lhs] {
+                if let Formula::Atom(Term::App(name, args)) = &**side {
+                    if args.is_empty() {
+                        return name.clone();
+                    }
                 }
             }
         }
