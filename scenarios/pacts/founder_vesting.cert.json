@@ -1,0 +1,189 @@
+{
+  "title": "Founder vesting pact — Avery & Quinn fix the cliff and the for-cause question in advance",
+  "parties": [
+    "Avery (founder who may depart)",
+    "Quinn (co-founder who stays)"
+  ],
+  "declared_predicates": [
+    "departure_for_cause",
+    "months_served"
+  ],
+  "obligations": [
+    {
+      "name": "coverage",
+      "verdict": "Proved",
+      "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause)."
+    },
+    {
+      "name": "consistent_0_1",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `pre_cliff_for_cause` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `vested_not_for_cause` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `pre_cliff_for_cause` and `vested_not_for_cause` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `pre_cliff_for_cause` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `vested_not_for_cause` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards."
+    }
+  ],
+  "status": "Certified",
+  "record": {
+    "entries": [
+      {
+        "seq": 0,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "kind": "coverage",
+        "detail": {
+          "receipt_detail": {
+            "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause).",
+            "obligation": "coverage"
+          },
+          "receipt_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "receipt_seq": 0
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 1,
+        "prev_hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "hash": "0c1a88e39607a65469e43150a0109d5d24b4c94b52ac59e4adde9055dc4aa417",
+        "kind": "consistent_0_1",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `pre_cliff_for_cause` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_1"
+          },
+          "receipt_hash": "73179b7c1956580f8ef198880b2dee3429ffe455ca665022744708d855d228bd",
+          "receipt_prev_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_seq": 1
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 2,
+        "prev_hash": "0c1a88e39607a65469e43150a0109d5d24b4c94b52ac59e4adde9055dc4aa417",
+        "hash": "a4970d66065a52c32dad44e8360017939c6494357fc6d5cd845cddeeca93c67c",
+        "kind": "consistent_0_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `vested_not_for_cause` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_2"
+          },
+          "receipt_hash": "9664dbd9c5d9c31350a0d7de67b796873b05a2a3b79ef1a9ac85007c5baa87d4",
+          "receipt_prev_hash": "73179b7c1956580f8ef198880b2dee3429ffe455ca665022744708d855d228bd",
+          "receipt_seq": 2
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 3,
+        "prev_hash": "a4970d66065a52c32dad44e8360017939c6494357fc6d5cd845cddeeca93c67c",
+        "hash": "a45818dcaac8aebbe4c37355dc0e3bb08c3f52643cdeb042ebe8e0d7f66a3a64",
+        "kind": "consistent_0_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `pre_cliff_clean` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_3"
+          },
+          "receipt_hash": "ab4d339313537f4e4bd70cee8416e464faaa9d7abe0e5ccea4cf684f6c60cf74",
+          "receipt_prev_hash": "9664dbd9c5d9c31350a0d7de67b796873b05a2a3b79ef1a9ac85007c5baa87d4",
+          "receipt_seq": 3
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 4,
+        "prev_hash": "a45818dcaac8aebbe4c37355dc0e3bb08c3f52643cdeb042ebe8e0d7f66a3a64",
+        "hash": "58096a1b285427cabac5b19dfe995f735538c37e692ff4ec46b70cbac5b89264",
+        "kind": "consistent_1_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `pre_cliff_for_cause` and `vested_not_for_cause` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_2"
+          },
+          "receipt_hash": "e7f13567f263a5db8efd4df6679fbe16dcf8a146a7c187da3a43baf37a81c6ee",
+          "receipt_prev_hash": "ab4d339313537f4e4bd70cee8416e464faaa9d7abe0e5ccea4cf684f6c60cf74",
+          "receipt_seq": 4
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 5,
+        "prev_hash": "58096a1b285427cabac5b19dfe995f735538c37e692ff4ec46b70cbac5b89264",
+        "hash": "28cf3527298c9c0cc78c79ada7de68aee05b259f8ed73aade3f45b7a75e7b073",
+        "kind": "consistent_1_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `pre_cliff_for_cause` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_3"
+          },
+          "receipt_hash": "c88f343a14a5467324775e40b8dd629bb9238514924b2df537471d6233167404",
+          "receipt_prev_hash": "e7f13567f263a5db8efd4df6679fbe16dcf8a146a7c187da3a43baf37a81c6ee",
+          "receipt_seq": 5
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 6,
+        "prev_hash": "28cf3527298c9c0cc78c79ada7de68aee05b259f8ed73aade3f45b7a75e7b073",
+        "hash": "f3beb07aee6eb09ea8294f5e8cf1a9377892fcbbfdc963c989d2658f36810101",
+        "kind": "consistent_2_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `vested_not_for_cause` and `vested_for_cause_forfeit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_3"
+          },
+          "receipt_hash": "bae4c04c022d6a57ef26ddee490a3e84188f05041820ae6094593c77b93fca28",
+          "receipt_prev_hash": "c88f343a14a5467324775e40b8dd629bb9238514924b2df537471d6233167404",
+          "receipt_seq": 6
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 7,
+        "prev_hash": "f3beb07aee6eb09ea8294f5e8cf1a9377892fcbbfdc963c989d2658f36810101",
+        "hash": "3f705c31587043d6576c63c6c31e26addc7a51c33b93a9d96e9ffc9aa5a299a8",
+        "kind": "pact_certified",
+        "detail": {
+          "complete": true,
+          "declared_predicates": [
+            "departure_for_cause",
+            "months_served"
+          ],
+          "non_contradictory": true,
+          "parties": [
+            "Avery (founder who may depart)",
+            "Quinn (co-founder who stays)"
+          ],
+          "scope": "relative to the DECLARED predicate space only",
+          "title": "Founder vesting pact — Avery & Quinn fix the cliff and the for-cause question in advance"
+        },
+        "verdict": null
+      }
+    ],
+    "public_key": "20f193313f089268c841362831d58b845f768d18629286a830ceaa69ef40effb",
+    "signature": "22d7296e19e4ccedb843d66238b28cb7c0fef6fcc6d8c7d729a7fee6f2c94ca0560069a511ad48443fe175c907bff403e53b418294aa4b17ed2ede178da7d007"
+  },
+  "scope_note": "Scope (honesty): this certificate is COMPLETE and CONSISTENT *relative to the\nDECLARED predicate space* only. It provably CANNOT detect a missing-but-\nforeseeable predicate nobody named — only a missing COMBINATION of the worlds\nthat were named. A green certificate does NOT imply completeness-in-the-world."
+}

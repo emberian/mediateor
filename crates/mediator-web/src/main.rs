@@ -41,7 +41,13 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(records);
     let app = router(state);
 
-    let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
+    // Bind 127.0.0.1:3000 by default; allow an override via `MEDIATEOR_ADDR`
+    // (e.g. `127.0.0.1:3001`) so a second instance can run alongside one already
+    // holding 3000 without a code change.
+    let addr: SocketAddr = std::env::var("MEDIATEOR_ADDR")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| "127.0.0.1:3000".parse().unwrap());
     println!("\n☄  Mediateor — listening on http://{addr}");
     println!("   Gallery:  http://{addr}/");
     println!("   (pick a dispute, then a seat — or watch as the mediator)\n");

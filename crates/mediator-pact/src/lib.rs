@@ -19,6 +19,34 @@
 //! is exactly what lets the certificate be issued before the fight, while the
 //! moral question stays the humans'.
 //!
+//! # The unknown-gate as a TYPE INVARIANT (the firewall, at authoring time)
+//!
+//! Before a single line of `.thy` is emitted, [`Pact::validate`] enforces that
+//! **every clause guard branches on at least one declared free crux predicate**
+//! (a `Bool`-sorted, nullary, uninterpreted symbol). A guard that depends only
+//! on the integer dials + literals is one the prover could decide on its own —
+//! a *value-call disguised as a guard* — and is REJECTED up front
+//! ([`Status::RejectedAtAuthoring`]). This makes "the machine never decides the
+//! value question" a property of the pact's *type*, not merely a runtime
+//! verdict. See [`validate`].
+//!
+//! # The trichotomy (three honest verdicts)
+//!
+//! Certification yields exactly one of three outcomes, keyed entirely on the
+//! gate's verdicts:
+//!
+//!   * [`Status::Certified`] — coverage Proved AND every consistency Proved.
+//!   * [`Status::Inconsistent`] — a consistency obligation failed, and we
+//!     EXHIBIT the concrete, re-checkable witness world (truth-values for the
+//!     declared crux predicates + concrete dial integers + the two conflicting
+//!     awards) where two clauses clash. See [`find_clash`] / [`InconsistencyWitness`].
+//!   * [`Status::Refused`] — a coverage gap (a declared world fires no clause),
+//!     surfaced in plain terms; the open subgoal IS the diagnosis.
+//!
+//! The witness search NEVER decides anything the gate didn't — it only turns a
+//! gate-reported clash into a concrete exhibit, and falls back to `Refused`
+//! (never a false `Certified`) if a clash is real but not bounded-searchable.
+//!
 //! # The validated seam
 //!
 //! The emitted `.thy` has *exactly* the shape of the hand-written, real-Isabelle
@@ -50,11 +78,15 @@ use mediator_types::{Formula, Obligation, Prover, Receipt, Sig, Verdict};
 use serde::{Deserialize, Serialize};
 
 mod codegen;
+mod validate;
+mod witness;
 
 pub use codegen::{
     consistency_obligation_name, coverage_obligation_name, guard_def_name, outcome_def_name,
     pact_codegen, pact_obligations, PACT_THEORY_NAME,
 };
+pub use validate::{crux_predicates, validate, ValidationError};
+pub use witness::{find_clash, recheck_witness, InconsistencyWitness};
 
 // ───────────────────────────── the pact ─────────────────────────────────
 
@@ -102,6 +134,20 @@ impl Pact {
             .map_err(|e| anyhow::anyhow!("could not parse pact {path}: {e}"))?;
         Ok(pact)
     }
+
+    /// The AUTHORING-time firewall (the unknown-gate as a *type invariant*). Run
+    /// BEFORE codegen/certify: returns every reason the pact is malformed or
+    /// smuggles a value-call (a clause guard the prover could decide on its own,
+    /// with no dependence on a declared free crux predicate). An empty result
+    /// means the pact is well-formed and may proceed to the gate.
+    ///
+    /// [`certify_pact`] calls this first and refuses up front (with
+    /// [`Status::RejectedAtAuthoring`]) when it is non-empty, so "the machine
+    /// never decides the value question" is enforced at authoring, not merely
+    /// observed as a runtime verdict.
+    pub fn validate(&self) -> Vec<ValidationError> {
+        validate::validate(self)
+    }
 }
 
 // ─────────────────────────── the certificate ────────────────────────────
@@ -126,13 +172,32 @@ impl ObligationOutcome {
     }
 }
 
-/// Whether a pact certified, and if not, *why not* in plain terms.
+/// Whether a pact certified, and if not, *why not* in plain terms. The three
+/// load-bearing prover outcomes are the **trichotomy**:
+///
+///   * [`Status::Certified`] — coverage Proved AND every consistency Proved;
+///   * [`Status::Inconsistent`] — a consistency obligation failed, and we
+///     EXHIBIT the concrete witness world where two clauses clash;
+///   * [`Status::Refused`] — a coverage gap (a declared world fires no clause),
+///     or any other obligation that did not close, surfaced as the gap.
+///
+/// A pact that fails the AUTHORING-time firewall ([`validate`]) never reaches
+/// the gate at all; that is the distinct [`Status::RejectedAtAuthoring`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Status {
     /// Coverage Proved AND every consistency Proved.
     Certified,
-    /// Some obligation was not Proved. Carries the gap, surfaced plainly.
+    /// A consistency obligation failed: two clauses can both fire while
+    /// demanding different awards. Carries the concrete, re-checkable witness
+    /// world — the third trichotomy leg.
+    Inconsistent { witness: InconsistencyWitness },
+    /// Some obligation was not Proved (a coverage gap, or a consistency failure
+    /// for which no concrete witness could be exhibited). Carries the gap.
     Refused { gap: Gap },
+    /// The pact was rejected at AUTHORING time by [`validate`], before any
+    /// Isabelle ran — e.g. a clause guard the prover could decide on its own (a
+    /// value-call disguised as a guard). Carries the plain-language reasons.
+    RejectedAtAuthoring { reasons: Vec<String> },
 }
 
 /// The diagnosis when a pact is REFUSED: which obligation failed, and what that
@@ -181,11 +246,28 @@ impl PactCertificate {
         matches!(self.status, Status::Certified)
     }
 
-    /// The gap, if refused.
+    /// The gap, if refused for a coverage/other obligation failure.
     pub fn gap(&self) -> Option<&Gap> {
         match &self.status {
             Status::Refused { gap } => Some(gap),
-            Status::Certified => None,
+            _ => None,
+        }
+    }
+
+    /// The inconsistency witness, if the pact is INCONSISTENT — the concrete
+    /// world where two clauses clash.
+    pub fn witness(&self) -> Option<&InconsistencyWitness> {
+        match &self.status {
+            Status::Inconsistent { witness } => Some(witness),
+            _ => None,
+        }
+    }
+
+    /// The authoring-time rejection reasons, if the pact never reached the gate.
+    pub fn rejected_reasons(&self) -> Option<&[String]> {
+        match &self.status {
+            Status::RejectedAtAuthoring { reasons } => Some(reasons),
+            _ => None,
         }
     }
 
@@ -228,6 +310,20 @@ impl PactCertificate {
                 );
                 out.push_str("  uninterpreted (free), handed back Unknown at dispute time.\n");
             }
+            Status::Inconsistent { witness } => {
+                out.push_str("INCONSISTENT (witnessed).\n");
+                out.push_str(&format!("  {}\n", witness.plain()));
+                out.push_str(
+                    "  This is a concrete, re-checkable world: evaluate the two clause guards\n",
+                );
+                out.push_str(
+                    "  at the named values and the two outcomes at the demanded awards, and the\n",
+                );
+                out.push_str(
+                    "  contradiction stands without Isabelle. Fix: tighten the two clauses so\n",
+                );
+                out.push_str("  they cannot both fire in that world.\n");
+            }
             Status::Refused { gap } => {
                 out.push_str("REFUSED.\n");
                 out.push_str(&format!(
@@ -236,6 +332,17 @@ impl PactCertificate {
                     verdict_word(&gap.verdict)
                 ));
                 out.push_str(&format!("  {}\n", gap.plain));
+            }
+            Status::RejectedAtAuthoring { reasons } => {
+                out.push_str("REJECTED AT AUTHORING (never reached Isabelle).\n");
+                out.push_str(
+                    "  The pact failed the unknown-gate firewall before a line of proof was\n",
+                );
+                out.push_str("  emitted — the machine refuses to even formalize a pact whose guards\n");
+                out.push_str("  it would decide on its own:\n");
+                for r in reasons {
+                    out.push_str(&format!("    • {r}\n"));
+                }
             }
         }
 
@@ -279,6 +386,16 @@ pub fn certify_pact_with_key(
     prover: &dyn Prover,
     signing_key: &ed25519_dalek::SigningKey,
 ) -> PactCertificate {
+    // THE FIREWALL, at authoring time. Before a single line of `.thy` is
+    // emitted, reject any pact whose guards the prover could decide on its own
+    // (a value-call disguised as a guard) — the unknown-gate as a type
+    // invariant. Such a pact never reaches Isabelle; we sign a record that says
+    // so honestly.
+    let validation = validate::validate(pact);
+    if !validation.is_empty() {
+        return rejected_certificate(pact, &validation, signing_key);
+    }
+
     let preamble = pact_codegen_preamble(pact);
     let obligations = pact_obligations(pact);
 
@@ -326,18 +443,49 @@ pub fn certify_pact_isabelle(pact: &Pact) -> PactCertificate {
     certify_pact(pact, &prover)
 }
 
+/// A FIXED, documented, **non-secret** signing key for reproducible *public*
+/// certificate caches (`scenarios/pacts/<name>.cert.json`).
+///
+/// A cached certificate is a public artifact checked into the repo so a box
+/// with no Isabelle can render the certified result. Signing it with a fresh
+/// random key each run would churn the signature on every regeneration; signing
+/// with this fixed key makes the cache byte-stable (re-running `--write-cert`
+/// reproduces the same file, modulo an actual change in a verdict) while still
+/// being a *valid, re-verifiable* ed25519 signature over the hash chain. It is
+/// deliberately NOT a secret — it authenticates "this is the published cache",
+/// not any party's consent. A real holder signs live certificates with their
+/// own key via [`certify_pact_with_key`].
+pub fn cache_signing_key() -> ed25519_dalek::SigningKey {
+    // 32 bytes, fixed. The literal ASCII spells the intent.
+    const SEED: [u8; 32] = *b"mediateor-pact-public-cache-key!";
+    ed25519_dalek::SigningKey::from_bytes(&SEED)
+}
+
+/// Certify a pact through the real gate and sign with the reproducible
+/// [`cache_signing_key`] — the entry point the `pact --write-cert` cache path
+/// uses so the on-disk `.cert.json` is stable across regenerations.
+pub fn certify_pact_for_cache(pact: &Pact) -> PactCertificate {
+    let prover = IsabelleProver::locate();
+    certify_pact_with_key(pact, &prover, &cache_signing_key())
+}
+
 /// The preamble half of the codegen (theory header + free consts + definitions,
 /// with NO trailing `end`), as the prover contract requires.
 fn pact_codegen_preamble(pact: &Pact) -> String {
     codegen::pact_preamble(pact)
 }
 
-/// Decide CERTIFIED vs REFUSED from the per-obligation verdicts alone.
+/// Decide the trichotomy — CERTIFIED / INCONSISTENT-with-witness / REFUSED —
+/// from the per-obligation verdicts alone. The verdicts come from the gate; the
+/// witness (when inconsistent) is a bounded, re-checkable Rust search, never a
+/// value-call.
 fn decide_status(pact: &Pact, outcomes: &[ObligationOutcome]) -> Status {
     let coverage_name = coverage_obligation_name();
 
     // Coverage first: if the disjunction of guards is not valid, *that* is the
-    // headline gap (a declared world fires no clause).
+    // headline gap (a declared world fires no clause). A coverage gap takes
+    // priority over a consistency clash — a pact that is silent somewhere is the
+    // more fundamental failure.
     if let Some(cov) = outcomes.iter().find(|o| o.name == coverage_name) {
         if !cov.proved() {
             return Status::Refused {
@@ -359,12 +507,22 @@ fn decide_status(pact: &Pact, outcomes: &[ObligationOutcome]) -> Status {
         };
     }
 
-    // Then every consistency: the first clash (or undecided pair) is the gap.
+    // Then every consistency obligation. The FIRST that did not close is the
+    // failure. If the gate left it `Unknown` (the goal genuinely does not hold —
+    // two clauses can clash), we EXHIBIT the concrete witness world: the third
+    // trichotomy leg, INCONSISTENT-with-witness. If a witness cannot be found
+    // (a malformed obligation that errored, or a clash outside the searchable
+    // fragment), we fall back to an honest REFUSED with the gap.
     for o in outcomes {
-        if o.name == coverage_obligation_name() {
+        if o.name == coverage_name {
             continue;
         }
         if !o.proved() {
+            if let Some((i, j)) = parse_consistency_pair(&o.name) {
+                if let Some(witness) = witness::find_clash(pact, i, j) {
+                    return Status::Inconsistent { witness };
+                }
+            }
             return Status::Refused {
                 gap: Gap {
                     obligation: o.name.clone(),
@@ -521,6 +679,19 @@ fn fold_record(
                 "scope": "relative to the DECLARED predicate space only",
             }),
         ),
+        Status::Inconsistent { witness } => (
+            "pact_inconsistent".to_string(),
+            serde_json::json!({
+                "title": pact.title,
+                "parties": pact.parties,
+                "declared_predicates": pact.predicates.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                "complete": true,
+                "non_contradictory": false,
+                "witness": witness,
+                "witness_plain": witness.plain(),
+                "scope": "relative to the DECLARED predicate space only",
+            }),
+        ),
         Status::Refused { gap } => (
             "pact_refused".to_string(),
             serde_json::json!({
@@ -533,10 +704,47 @@ fn fold_record(
                 "scope": "relative to the DECLARED predicate space only",
             }),
         ),
+        Status::RejectedAtAuthoring { reasons } => (
+            "pact_rejected_at_authoring".to_string(),
+            serde_json::json!({
+                "title": pact.title,
+                "parties": pact.parties,
+                "declared_predicates": pact.predicates.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                "reasons": reasons,
+                "scope": "rejected by the unknown-gate firewall BEFORE any Isabelle ran",
+            }),
+        ),
     };
     events.push((kind, detail));
 
     build_record(&receipts, &events, signing_key)
+}
+
+/// Build the certificate for a pact REJECTED at authoring time by [`validate`].
+/// No obligations were generated (the pact never reached the gate); the signed
+/// record carries the plain-language reasons so the rejection is itself
+/// tamper-evident and re-verifiable.
+fn rejected_certificate(
+    pact: &Pact,
+    errors: &[ValidationError],
+    signing_key: &ed25519_dalek::SigningKey,
+) -> PactCertificate {
+    let reasons: Vec<String> = errors.iter().map(|e| e.plain()).collect();
+    let status = Status::RejectedAtAuthoring {
+        reasons: reasons.clone(),
+    };
+    // No obligation receipts — the firewall fired before codegen. The record is
+    // just the rejection event, still signed and verifiable.
+    let record = fold_record(pact, &[], &status, signing_key);
+    PactCertificate {
+        title: pact.title.clone(),
+        parties: pact.parties.clone(),
+        declared_predicates: pact.predicates.iter().map(|s| s.name.clone()).collect(),
+        obligations: Vec::new(),
+        status,
+        record,
+        scope_note: SCOPE_NOTE.to_string(),
+    }
 }
 
 // The audit crate's hashing is private; we reproduce its receipt-chain hash so

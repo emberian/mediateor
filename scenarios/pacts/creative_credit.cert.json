@@ -1,0 +1,189 @@
+{
+  "title": "Creative collaboration & credit pact — Mara & Devon settle the credit line before release",
+  "parties": [
+    "Mara (lead author)",
+    "Devon (collaborator)"
+  ],
+  "declared_predicates": [
+    "substantial_creative_contribution",
+    "hours_logged"
+  ],
+  "obligations": [
+    {
+      "name": "coverage",
+      "verdict": "Proved",
+      "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause)."
+    },
+    {
+      "name": "consistent_0_1",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `co_creator` and `credited_contributor` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `co_creator` and `co_creator_light` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_0_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `co_creator` and `assistant_credit` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_2",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `credited_contributor` and `co_creator_light` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_1_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `credited_contributor` and `assistant_credit` never both fire while demanding conflicting awards."
+    },
+    {
+      "name": "consistent_2_3",
+      "verdict": "Proved",
+      "describes": "CONSISTENCY: clauses `co_creator_light` and `assistant_credit` never both fire while demanding conflicting awards."
+    }
+  ],
+  "status": "Certified",
+  "record": {
+    "entries": [
+      {
+        "seq": 0,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "kind": "coverage",
+        "detail": {
+          "receipt_detail": {
+            "describes": "COVERAGE: the disjunction of all clause-guards is valid (every declared world fires some clause).",
+            "obligation": "coverage"
+          },
+          "receipt_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "receipt_seq": 0
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 1,
+        "prev_hash": "ad2172b0f531683c0680b7c69735a6edc674f75275db15bdbf5018397465e3f1",
+        "hash": "f15902b284bc4ba3fe7a27ccd676fd2017350cf97162bd930c7bc3251822386f",
+        "kind": "consistent_0_1",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `co_creator` and `credited_contributor` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_1"
+          },
+          "receipt_hash": "139fc8a3d1c9f0b9b48a45e70eb41adb12881ec2e0758ffa6ee134531196f0f0",
+          "receipt_prev_hash": "324625cfcc66ae76f9c6f5ea063aab89302ddc4d557f38db20e74175fc5091da",
+          "receipt_seq": 1
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 2,
+        "prev_hash": "f15902b284bc4ba3fe7a27ccd676fd2017350cf97162bd930c7bc3251822386f",
+        "hash": "2fa4fdf5328862904067502092c2ef5a873c8bbbebed1fd6647e293765c418e7",
+        "kind": "consistent_0_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `co_creator` and `co_creator_light` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_2"
+          },
+          "receipt_hash": "61c29fbfef39fe50502916755f3650c0bbfac6bcbe5c37e03e5241df9aa2b41d",
+          "receipt_prev_hash": "139fc8a3d1c9f0b9b48a45e70eb41adb12881ec2e0758ffa6ee134531196f0f0",
+          "receipt_seq": 2
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 3,
+        "prev_hash": "2fa4fdf5328862904067502092c2ef5a873c8bbbebed1fd6647e293765c418e7",
+        "hash": "a43bad5d823b1b69442e6f622e15614b10b265127f66dc8d5691ce7e850a1aff",
+        "kind": "consistent_0_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `co_creator` and `assistant_credit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_0_3"
+          },
+          "receipt_hash": "a7db40fd8ba7db24884081e8a4a71fad56a57ca0e1a96347a345bbc8ec0f6542",
+          "receipt_prev_hash": "61c29fbfef39fe50502916755f3650c0bbfac6bcbe5c37e03e5241df9aa2b41d",
+          "receipt_seq": 3
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 4,
+        "prev_hash": "a43bad5d823b1b69442e6f622e15614b10b265127f66dc8d5691ce7e850a1aff",
+        "hash": "749622dcb4d07e1ad0534530fdc97a975bda5600825ebddd302a8dd77726a9e6",
+        "kind": "consistent_1_2",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `credited_contributor` and `co_creator_light` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_2"
+          },
+          "receipt_hash": "2b2b79254474e1aac02e4b249d924bce84b26bfa194bbaf745ea95790a110533",
+          "receipt_prev_hash": "a7db40fd8ba7db24884081e8a4a71fad56a57ca0e1a96347a345bbc8ec0f6542",
+          "receipt_seq": 4
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 5,
+        "prev_hash": "749622dcb4d07e1ad0534530fdc97a975bda5600825ebddd302a8dd77726a9e6",
+        "hash": "cd24f25e03e9e07c4ec550769f1a1cc7c06ce8bf8c81ce813ebbfd8e2e5f98aa",
+        "kind": "consistent_1_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `credited_contributor` and `assistant_credit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_1_3"
+          },
+          "receipt_hash": "d274615f8b945f61f730c43cd29611cd90fcd46346eee363444ab2d208685712",
+          "receipt_prev_hash": "2b2b79254474e1aac02e4b249d924bce84b26bfa194bbaf745ea95790a110533",
+          "receipt_seq": 5
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 6,
+        "prev_hash": "cd24f25e03e9e07c4ec550769f1a1cc7c06ce8bf8c81ce813ebbfd8e2e5f98aa",
+        "hash": "2d994b957334fc558fc9455720b537f2e04399b1133bb60f1f4b77caa0175543",
+        "kind": "consistent_2_3",
+        "detail": {
+          "receipt_detail": {
+            "describes": "CONSISTENCY: clauses `co_creator_light` and `assistant_credit` never both fire while demanding conflicting awards.",
+            "obligation": "consistent_2_3"
+          },
+          "receipt_hash": "5794f2db0fca4a841b79c388de85b54776279070197abf3e66e9e2916654ddf6",
+          "receipt_prev_hash": "d274615f8b945f61f730c43cd29611cd90fcd46346eee363444ab2d208685712",
+          "receipt_seq": 6
+        },
+        "verdict": "Proved"
+      },
+      {
+        "seq": 7,
+        "prev_hash": "2d994b957334fc558fc9455720b537f2e04399b1133bb60f1f4b77caa0175543",
+        "hash": "5d250292890fa39356b5f2152daf688a3ca4110aec61fbfe29ef8fce26ee8b7e",
+        "kind": "pact_certified",
+        "detail": {
+          "complete": true,
+          "declared_predicates": [
+            "substantial_creative_contribution",
+            "hours_logged"
+          ],
+          "non_contradictory": true,
+          "parties": [
+            "Mara (lead author)",
+            "Devon (collaborator)"
+          ],
+          "scope": "relative to the DECLARED predicate space only",
+          "title": "Creative collaboration & credit pact — Mara & Devon settle the credit line before release"
+        },
+        "verdict": null
+      }
+    ],
+    "public_key": "20f193313f089268c841362831d58b845f768d18629286a830ceaa69ef40effb",
+    "signature": "b8f81f5dde3567d421b52665d148bb4285260ec1d764efb9d509c9115d4d3b3c9f41369b0daa4268baafe1947bf22c84c8aed3e0f2d1dd4f0527f45a171c900e"
+  },
+  "scope_note": "Scope (honesty): this certificate is COMPLETE and CONSISTENT *relative to the\nDECLARED predicate space* only. It provably CANNOT detect a missing-but-\nforeseeable predicate nobody named — only a missing COMBINATION of the worlds\nthat were named. A green certificate does NOT imply completeness-in-the-world."
+}

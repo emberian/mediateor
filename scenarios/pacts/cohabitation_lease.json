@@ -1,0 +1,60 @@
+{
+  "title": "Cohabitation & shared-lease pact — Sasha & Ari split the deposit before either moves out",
+  "parties": ["Sasha (leaving the lease)", "Ari (keeping the lease)"],
+  "predicates": [
+    {
+      "name": "damage_beyond_normal_wear",
+      "arg_sorts": [],
+      "ret": "Bool",
+      "gloss": "whether the apartment's condition is damage beyond ordinary wear-and-tear (chargeable against the deposit) vs. normal living wear — the contested future crux, left uninterpreted"
+    },
+    {
+      "name": "days_cohabited",
+      "arg_sorts": [],
+      "ret": "Int",
+      "gloss": "how many days Sasha & Ari shared the apartment — an agreed, measurable integer (the 180-day 'settled tenancy' threshold is stipulated). The outcome `award` is Sasha's deposit return in cents."
+    }
+  ],
+  "clauses": [
+    {
+      "name": "settled_clean",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 180 }, { "App": ["days_cohabited", []] } ] },
+          { "Not": { "Atom": { "App": ["damage_beyond_normal_wear", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 100000 } ] }
+    },
+    {
+      "name": "settled_damaged",
+      "guard": {
+        "And": [
+          { "Le": [ { "IntLit": 180 }, { "App": ["days_cohabited", []] } ] },
+          { "Atom": { "App": ["damage_beyond_normal_wear", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 70000 } ] }
+    },
+    {
+      "name": "brief_clean",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["days_cohabited", []] }, { "IntLit": 180 } ] },
+          { "Not": { "Atom": { "App": ["damage_beyond_normal_wear", []] } } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 90000 } ] }
+    },
+    {
+      "name": "brief_damaged",
+      "guard": {
+        "And": [
+          { "Lt": [ { "App": ["days_cohabited", []] }, { "IntLit": 180 } ] },
+          { "Atom": { "App": ["damage_beyond_normal_wear", []] } }
+        ]
+      },
+      "outcome": { "Eq": [ { "Var": "award" }, { "IntLit": 60000 } ] }
+    }
+  ]
+}

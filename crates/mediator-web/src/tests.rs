@@ -1009,3 +1009,343 @@ fn options_lead_with_one_and_fold_the_rest_behind_a_quiet_disclosure() {
     assert!(html1.contains("A way forward"));
     assert!(!html1.contains("<details"), "one option needs no disclosure");
 }
+
+// ════════════════════════ FORWARD CONSTITUTIONS (pacts) ══════════════════════
+//
+// The /pacts gallery and /pact/:id detail render the CACHED certificates the
+// anchor worker proved through the real gate. These tests never run Isabelle:
+// they build authentic `PactCertificate`s by driving `certify_pact` with a MOCK
+// prover that returns canned per-obligation verdicts, exactly the way the gate's
+// output is consumed — so the three trichotomy verdicts (CERTIFIED / INCONSISTENT
+// / REFUSED) and the witness/gap diagnoses are produced by the real status logic.
+
+mod pact_tests {
+    use super::*;
+    use crate::pacts::PactRecord;
+    use mediator_pact::{Clause, Pact, certify_pact};
+    use std::collections::HashMap;
+
+    /// A mock prover: returns a fixed verdict per obligation name. Drives
+    /// `certify_pact` through the genuine status/witness logic with no Isabelle.
+    struct MockProver(HashMap<String, Verdict>);
+    impl mediator_types::Prover for MockProver {
+        fn check(
+            &self,
+            _preamble: &str,
+            obligations: &[mediator_types::Obligation],
+        ) -> HashMap<String, Verdict> {
+            obligations
+                .iter()
+                .map(|o| {
+                    let v = self.0.get(&o.name).cloned().unwrap_or(Verdict::Proved);
+                    (o.name.clone(), v)
+                })
+                .collect()
+        }
+    }
+
+    fn b_sig(name: &str, gloss: &str) -> Sig {
+        Sig { name: name.into(), arg_sorts: vec![], ret: Sort::Bool, gloss: gloss.into() }
+    }
+    fn i_sig(name: &str, gloss: &str) -> Sig {
+        Sig { name: name.into(), arg_sorts: vec![], ret: Sort::Int, gloss: gloss.into() }
+    }
+    fn atom(n: &str) -> Formula {
+        Formula::Atom(Term::App(n.into(), vec![]))
+    }
+    fn award(cents: i64) -> Formula {
+        Formula::Eq(Term::Var("award".into()), Term::IntLit(cents))
+    }
+
+    /// The roommate move-out pact (the validated shape), parameterised by which
+    /// clauses to include — so we can build the COMPLETE pact, and a BROKEN one
+    /// missing the short-notice clauses.
+    fn roommate_pact(full: bool) -> Pact {
+        let ge30 = || Formula::Le(Term::IntLit(30), Term::App("notice_days".into(), vec![]));
+        let lt30 = || Formula::Lt(Term::App("notice_days".into(), vec![]), Term::IntLit(30));
+        let mut clauses = vec![
+            Clause {
+                name: "clean".into(),
+                guard: Formula::And(vec![ge30(), Formula::Not(Box::new(atom("stain_is_damage")))]),
+                outcome: award(120000),
+            },
+            Clause {
+                name: "damaged".into(),
+                guard: Formula::And(vec![ge30(), atom("stain_is_damage")]),
+                outcome: award(90000),
+            },
+        ];
+        if full {
+            clauses.push(Clause {
+                name: "short_clean".into(),
+                guard: Formula::And(vec![lt30(), Formula::Not(Box::new(atom("stain_is_damage")))]),
+                outcome: award(100000),
+            });
+            clauses.push(Clause {
+                name: "short_damaged".into(),
+                guard: Formula::And(vec![lt30(), atom("stain_is_damage")]),
+                outcome: award(100000),
+            });
+        }
+        Pact {
+            title: "Roommate move-out pact — Robin & Sam settle the deposit in advance".into(),
+            parties: vec!["Robin (moving out)".into(), "Sam (staying, holds the deposit)".into()],
+            predicates: vec![
+                b_sig(
+                    "stain_is_damage",
+                    "the carpet stain counts as chargeable damage (vs. ordinary wear) — the contested future crux, left uninterpreted",
+                ),
+                i_sig(
+                    "notice_days",
+                    "how many days' notice Robin gives before moving out — an agreed, measurable integer (the 30-day cliff is stipulated)",
+                ),
+            ],
+            clauses,
+        }
+    }
+
+    /// An INCONSISTENT pact: an extra clause overlapping `clean` but demanding a
+    /// different award, so `consistent_0_2` fails and a witness is exhibited.
+    fn inconsistent_pact() -> Pact {
+        let mut p = roommate_pact(true);
+        p.title = "Roommate move-out pact (INCONSISTENT) — two clauses overlap".into();
+        // insert at index 2 an always-firing (for notice≥30) clause awarding 100000
+        let ge30 = Formula::Le(Term::IntLit(30), Term::App("notice_days".into(), vec![]));
+        let taut = Formula::Or(vec![atom("stain_is_damage"), Formula::Not(Box::new(atom("stain_is_damage")))]);
+        p.clauses.insert(
+            2,
+            Clause {
+                name: "late_penalty_overlap".into(),
+                guard: Formula::And(vec![ge30, taut]),
+                outcome: award(100000),
+            },
+        );
+        p
+    }
+
+    /// Build a `PactRecord` by driving `certify_pact` with the mock prover that
+    /// makes the named obligations fail (everything else proves).
+    fn record(id: &str, pact: Pact, failing: &[(&str, Verdict)]) -> PactRecord {
+        let map: HashMap<String, Verdict> =
+            failing.iter().map(|(n, v)| (n.to_string(), v.clone())).collect();
+        let cert = certify_pact(&pact, &MockProver(map));
+        PactRecord { id: id.to_string(), pact, cert }
+    }
+
+    /// A state carrying the three trichotomy fixtures (and the roommate dispute so
+    /// the landing page still renders its room links).
+    fn pact_state() -> AppState {
+        let certified = record("roommate_moveout", roommate_pact(true), &[]);
+        let inconsistent = record(
+            "roommate_overlap_inconsistent",
+            inconsistent_pact(),
+            &[("consistent_0_2", Verdict::Unknown), ("consistent_1_2", Verdict::Unknown)],
+        );
+        let broken = record(
+            "roommate_moveout_broken",
+            roommate_pact(false),
+            &[("coverage", Verdict::Unknown)],
+        );
+        AppState::new(vec![roommate_record()])
+            .with_pacts(vec![certified, inconsistent, broken])
+    }
+
+    #[tokio::test]
+    async fn pacts_gallery_lists_the_certified_corpus() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(Request::builder().uri("/pacts").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("Forward constitutions"), "page title missing");
+        assert!(html.contains("Robin &amp; Sam"), "parties line missing");
+        // the trichotomy chips, in plain warm words (never machine vocab)
+        assert!(html.contains("certified"), "certified chip missing");
+        assert!(html.contains("rules collide"), "inconsistent chip missing");
+        assert!(html.contains("a gap remains"), "refused chip missing");
+        // links into each detail page
+        assert!(html.contains("/pact/roommate_moveout"));
+        assert!(html.contains("/pact/roommate_overlap_inconsistent"));
+        // honesty floor: never the machine words, anywhere on the page
+        assert_no_jargon(&html);
+    }
+
+    #[tokio::test]
+    async fn certified_pact_reads_warmly_and_shows_provenance() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(Request::builder().uri("/pact/roommate_moveout").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        // the CERTIFIED verdict in plain language
+        assert!(html.contains("This agreement holds"), "certified headline missing");
+        assert!(
+            html.contains("handled by one of the clauses") && html.contains("no two"),
+            "certified body missing"
+        );
+        // the declared open question, in warm words
+        assert!(html.contains("Whether the carpet stain counts as chargeable damage"));
+        assert!(html.contains("left to you"), "open-question tag missing");
+        // clauses as if-this-then-that, with money formatted (the deposit refund)
+        assert!(html.contains("If ") && html.contains("then "), "if/then framing missing");
+        assert!(html.contains("$1200.00"), "deposit amount not money-formatted");
+        // re-verifiable provenance, shown quietly and honestly (proved OFF this box)
+        assert!(html.contains("Re-verifiable provenance"), "provenance section missing");
+        assert!(html.contains("proved through the real prover off this box"), "off-box honesty missing");
+        assert!(html.contains("the signed certificate verifies"), "verification line missing");
+        // the honest scope caveat travels with it
+        assert!(html.contains("never that it named every question"), "scope caveat missing");
+        assert_no_jargon(&html);
+    }
+
+    #[tokio::test]
+    async fn inconsistent_pact_exhibits_the_concrete_clash() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/pact/roommate_overlap_inconsistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        // the INCONSISTENT verdict + the concrete witness world ("here is when")
+        assert!(html.contains("can collide"), "inconsistent headline missing");
+        assert!(html.contains("both apply"), "clash body missing");
+        // the witness names the two clashing rules and the two amounts
+        assert!(html.contains("clean"), "clashing clause name missing");
+        assert!(html.contains("both apply — one asks for"), "witness amounts framing missing");
+        assert!(
+            html.contains("$1200.00") && html.contains("$1000.00"),
+            "the two conflicting amounts missing"
+        );
+        assert!(html.contains("owe two different amounts"), "the contradiction not named");
+        assert_no_jargon(&html);
+    }
+
+    #[tokio::test]
+    async fn refused_pact_exhibits_the_uncovered_world() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/pact/roommate_moveout_broken")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        // the REFUSED verdict + a CONCRETE uncovered world ("here it is")
+        assert!(html.contains("left a situation unhandled"), "refused headline missing");
+        assert!(html.contains("For example:"), "concrete uncovered world missing");
+        assert!(html.contains("no clause applies at all"), "silence-of-the-pact framing missing");
+        // it found the dropped short-notice world (fewer than 30 days)
+        assert!(html.contains(" is 29"), "the boundary world (notice=29) not exhibited");
+        assert_no_jargon(&html);
+    }
+
+    #[tokio::test]
+    async fn draft_your_own_emits_live_source_without_a_verdict() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(Request::builder().uri("/pact/roommate_moveout").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let html = body_string(resp).await;
+        // the authoring explainer
+        assert!(html.contains("Draft your own"), "draft section missing");
+        assert!(html.contains("Name the open questions"), "authoring step 1 missing");
+        assert!(html.contains("Add your if-then rules"), "authoring step 2 missing");
+        // the live source is the machine-checkable promise, emitted by pact_codegen
+        assert!(html.contains("Show the machine-checkable promise"), "source disclosure missing");
+        assert!(html.contains("theory Mediator_Pact_Gen"), "generated theory header missing");
+        assert!(html.contains("theorem coverage:"), "generated coverage theorem missing");
+        // …framed honestly as NOT proved here
+        assert!(html.contains("not"), "honesty framing missing");
+        assert!(
+            html.contains("the exact text the prover checks where it runs"),
+            "where-the-prover-lives framing missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn landing_links_to_forward_constitutions_when_present() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let html = body_string(resp).await;
+        // discoverable beside the live room
+        assert!(html.contains("/pacts"), "no link to the pact gallery from the landing");
+        assert!(html.contains("Forward constitutions"), "forward-constitutions invite missing");
+    }
+
+    /// A box that serves ONLY pacts (no disputes loaded) still surfaces the
+    /// forward-constitutions door on the landing — the link must not hinge on a
+    /// dispute existing.
+    #[tokio::test]
+    async fn landing_links_to_pacts_even_with_no_disputes() {
+        let certified = record("roommate_moveout", roommate_pact(true), &[]);
+        let state = AppState::new(vec![]).with_pacts(vec![certified]);
+        assert!(state.is_empty(), "fixture should have no disputes");
+        let app = router(state);
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("/pacts"), "pacts link absent on a pacts-only box");
+        assert!(html.contains("Settle it in advance"), "primary pact CTA missing");
+        assert!(html.contains("Forward constitutions"), "forward-invite card missing");
+    }
+
+    #[tokio::test]
+    async fn unknown_pact_404s() {
+        let app = router(pact_state());
+        let resp = app
+            .oneshot(Request::builder().uri("/pact/nope").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// The honesty floor for every pact page: the machine vocabulary the room
+    /// keeps backstage must NEVER reach a human reader.
+    fn assert_no_jargon(html: &str) {
+        let body = body_after_head(html);
+        for word in ["obligation", "predicate", "Presburger", "Isabelle", "uninterpreted"] {
+            assert!(
+                !body.contains(word),
+                "forbidden machine word '{word}' leaked into the rendered body"
+            );
+        }
+    }
+
+    /// Strip the `<head>` (whose `<title>` legitimately holds the page name) and
+    /// the inline `<style>`/source `<pre>` blocks (the generated `.thy` source is
+    /// shown *on purpose* in the Draft-your-own disclosure, framed as the prover's
+    /// own text), so the jargon check only sees the warm human copy.
+    fn body_after_head(html: &str) -> String {
+        let mut s = html.split("</head>").nth(1).unwrap_or(html).to_string();
+        // drop any <pre>…</pre> (the generated theory source is meant to be shown)
+        while let (Some(a), Some(b)) = (s.find("<pre"), s.find("</pre>")) {
+            if a < b {
+                s.replace_range(a..b + "</pre>".len(), " ");
+            } else {
+                break;
+            }
+        }
+        s
+    }
+}

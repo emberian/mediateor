@@ -14,6 +14,15 @@ mediator-fairdiv = { workspace = true }
 mediator-llm = { workspace = true }
 mediator-session = { workspace = true }
 mediator-audit = { workspace = true }
+# Forward constitutions (certified pacts). We use it for the `Pact`/`PactCertificate`
+# *types* (to render the certified corpus + its cached certificates) and for
+# `pact_codegen` (pure text emission — needs NO Isabelle). The box never runs the
+# gate; it renders the cached `.cert.json` the anchor worker wrote.
+#
+# Declared as a direct path dep (rather than `{ workspace = true }`) so this crate
+# stays self-contained — it builds whether or not the root manifest also lists a
+# `mediator-pact` workspace entry.
+mediator-pact = { path = "../mediator-pact" }
 ed25519-dalek = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

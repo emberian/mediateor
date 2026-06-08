@@ -1584,6 +1584,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mediator-pact-commons"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ed25519-dalek",
+ "hex",
+ "mediator-audit",
+ "mediator-pact",
+ "mediator-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "mediator-prover"
 version = "0.1.0"
 dependencies = [
@@ -1635,6 +1650,7 @@ dependencies = [
  "mediator-core",
  "mediator-fairdiv",
  "mediator-llm",
+ "mediator-pact",
  "mediator-prover",
  "mediator-session",
  "mediator-types",
