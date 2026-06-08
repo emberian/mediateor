@@ -19,7 +19,7 @@ must not be fudged are checked by a machine that has no stake in the outcome.*
 Codename **Mediateor** (a meteor ☄️ of a mediator). Built by ember (proof
 engineer, trained peer mediator) and Claude, with pug giving it a face; seeded by
 [world-model-trajectories](https://emberian.github.io/world-model-trajectories/).
-Live, password-walled for now, at **mediateor.fg-goose.online**.
+Live and open to all at **mediateor.fg-goose.online**.
 
 ---
 
@@ -134,8 +134,13 @@ plain, kind conversation.
                                              │
               mediator-session  ◄────────────┤   the AI actually mediating (the point)
               mediator-fairdiv  ◄────────────┤   certified-fair options (3 procedures)
-              mediator-ontology ◄────────────┤   genuine clash vs. just-different-words
               mediator-audit    ◄────────────┘   signed, verifiable record of it all
+
+   · · · · · · · · · · · · · · · · · · · · ·   (exploratory sidecar — NOT load-bearing)
+     mediator-ontology   synonym-merge / well-typed aliasing. Honest: no dispute we've
+                         put through it yet actually NEEDS the pushout — a plain heuristic
+                         would do. It's here to find the limit of the categorical idea,
+                         not because anything load-bearing depends on it.
 ```
 
 | crate | what it is |
