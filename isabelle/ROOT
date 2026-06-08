@@ -1,0 +1,4 @@
+session "Mediator_Keystone" = HOL +
+  description "First stone: the formalizable core of a dispute, held backstage."
+  theories
+    Keystone
