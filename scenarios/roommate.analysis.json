@@ -34,31 +34,102 @@
             "sam"
           ],
           [
+            "standing_desk",
+            "robin"
+          ],
+          [
             "bookshelf",
             "sam"
           ]
         ],
-        "envy_free": true,
-        "equitable": true,
-        "explanation": "Adjusted Winner settlement:\n  The shared couch → robin (whole item)\n  Kitchenware set → sam (whole item)\n  Bookshelf → sam (whole item)\n  Standing desk → split: 53.8% to robin, 46.2% to sam\nFinal point totals: robin = 58.8462, sam = 58.8462\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
-        "label": "Adjusted Winner",
+        "envy_free": false,
+        "equitable": false,
+        "explanation": "Adjusted Winner (Brams–Taylor):\n  The shared couch → robin (whole)\n  Kitchenware set → sam (whole)\n  Standing desk → robin (whole)\n  Bookshelf → sam (whole)\nFinal point totals: robin = 75.0000, sam = 45.0000\nEnvy-free: false  |  Equitable: false  |  Proportional: false  |  Pareto-optimal: true\nAW is the unique envy-free + equitable allocation for divisible goods.\nNote: one or more fairness properties do not hold, which can occur when some items are indivisible.",
+        "label": "Adjusted Winner (envy-free + equitable)",
         "pareto_optimal": true,
         "party_points": [
           [
             "robin",
-            58.84615384615385
+            75.0
           ],
           [
             "sam",
-            58.84615384615385
+            45.0
           ]
         ],
-        "splits": [
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "couch",
+            "robin"
+          ],
+          [
+            "kitchenware",
+            "sam"
+          ],
           [
             "standing_desk",
-            0.5384615384615384
+            "sam"
+          ],
+          [
+            "bookshelf",
+            "robin"
           ]
-        ]
+        ],
+        "envy_free": true,
+        "equitable": false,
+        "explanation": "Egalitarian / Max-min settlement:\n  The shared couch → robin (whole)\n  Kitchenware set → sam (whole)\n  Standing desk → sam (whole)\n  Bookshelf → robin (whole)\nFinal point totals: robin = 55.0000, sam = 60.0000\nWorse-off party's value: 55.0000\nEnvy-free: true  |  Equitable: false  |  Proportional: true  |  Pareto-optimal: true\nThis option maximises the minimum value received by either party, prioritising the worse-off party's share.",
+        "label": "Max-min egalitarian (maximise worse-off party)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "robin",
+            55.0
+          ],
+          [
+            "sam",
+            60.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "couch",
+            "robin"
+          ],
+          [
+            "kitchenware",
+            "sam"
+          ],
+          [
+            "standing_desk",
+            "robin"
+          ],
+          [
+            "bookshelf",
+            "robin"
+          ]
+        ],
+        "envy_free": false,
+        "equitable": false,
+        "explanation": "Split-the-difference equitable compromise:\n  The shared couch → robin (whole)\n  Kitchenware set → sam (whole)\n  Standing desk → robin (whole)\n  Bookshelf → robin (whole)\nFinal point totals: robin = 90.0000, sam = 30.0000\nEnvy-free: false  |  Equitable: false  |  Proportional: false  |  Pareto-optimal: true\nEach party targets half of their own total valuation. Divisible items are fractionally split to reach that target; indivisible items go to the party that values them more.",
+        "label": "Split-the-difference (equitable compromise)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "robin",
+            90.0
+          ],
+          [
+            "sam",
+            30.0
+          ]
+        ],
+        "splits": []
       }
     ],
     "shared_core": [
@@ -127,13 +198,15 @@
     },
     {
       "detail": {
-        "envy_free": true,
+        "envy_free": false,
         "labels": [
-          "Adjusted Winner"
+          "Adjusted Winner (envy-free + equitable)",
+          "Max-min egalitarian (maximise worse-off party)",
+          "Split-the-difference (equitable compromise)"
         ],
-        "n_settlements": 1
+        "n_settlements": 3
       },
-      "hash": "af346b2af5813e9f0db5e3177966e180f04aad9f15e9cf0e843a117f851fa223",
+      "hash": "93236b38ba14ac371917675a335ee7f6000b5f769dc6e4727618157895b84b89",
       "op": "fair_division",
       "prev_hash": "a52b93b75940dabb09bad3d9e73ea28bf27fd543599efdd349e758044f941883",
       "seq": 4,

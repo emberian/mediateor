@@ -34,31 +34,102 @@
             "maya"
           ],
           [
+            "source_code",
+            "theo"
+          ],
+          [
             "design_assets",
             "theo"
           ]
         ],
         "envy_free": true,
-        "equitable": true,
-        "explanation": "Adjusted Winner settlement:\n  Domain and hosting accounts (prepaid 1 year) → maya (whole item)\n  Logo and brand asset files → maya (whole item)\n  Design mockup files and style guide → theo (whole item)\n  Website source code repository → split: 14.3% to maya, 85.7% to theo\nFinal point totals: maya = 68.5714, theo = 68.5714\nThe split is equitable (equal point totals) and envy-free: neither party values the other's share more than their own.\nPareto-optimal: no redistribution can make one party better off without harming the other.",
-        "label": "Adjusted Winner",
+        "equitable": false,
+        "explanation": "Adjusted Winner (Brams–Taylor):\n  Domain and hosting accounts (prepaid 1 year) → maya (whole)\n  Logo and brand asset files → maya (whole)\n  Website source code repository → theo (whole)\n  Design mockup files and style guide → theo (whole)\nFinal point totals: maya = 65.0000, theo = 75.0000\nEnvy-free: true  |  Equitable: false  |  Proportional: true  |  Pareto-optimal: true\nAW is the unique envy-free + equitable allocation for divisible goods.\nNote: one or more fairness properties do not hold, which can occur when some items are indivisible.",
+        "label": "Adjusted Winner (envy-free + equitable)",
         "pareto_optimal": true,
         "party_points": [
           [
             "maya",
-            68.57142857142857
+            65.0
           ],
           [
             "theo",
-            68.57142857142858
+            75.0
           ]
         ],
-        "splits": [
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "domain_hosting",
+            "maya"
+          ],
+          [
+            "logo_files",
+            "maya"
+          ],
           [
             "source_code",
-            0.14285714285714285
+            "theo"
+          ],
+          [
+            "design_assets",
+            "theo"
           ]
-        ]
+        ],
+        "envy_free": true,
+        "equitable": false,
+        "explanation": "Egalitarian / Max-min settlement:\n  Domain and hosting accounts (prepaid 1 year) → maya (whole)\n  Logo and brand asset files → maya (whole)\n  Website source code repository → theo (whole)\n  Design mockup files and style guide → theo (whole)\nFinal point totals: maya = 65.0000, theo = 75.0000\nWorse-off party's value: 65.0000\nEnvy-free: true  |  Equitable: false  |  Proportional: true  |  Pareto-optimal: true\nThis option maximises the minimum value received by either party, prioritising the worse-off party's share.",
+        "label": "Max-min egalitarian (maximise worse-off party)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "maya",
+            65.0
+          ],
+          [
+            "theo",
+            75.0
+          ]
+        ],
+        "splits": []
+      },
+      {
+        "allocations": [
+          [
+            "domain_hosting",
+            "maya"
+          ],
+          [
+            "logo_files",
+            "maya"
+          ],
+          [
+            "source_code",
+            "theo"
+          ],
+          [
+            "design_assets",
+            "theo"
+          ]
+        ],
+        "envy_free": true,
+        "equitable": false,
+        "explanation": "Split-the-difference equitable compromise:\n  Domain and hosting accounts (prepaid 1 year) → maya (whole)\n  Logo and brand asset files → maya (whole)\n  Website source code repository → theo (whole)\n  Design mockup files and style guide → theo (whole)\nFinal point totals: maya = 65.0000, theo = 75.0000\nEnvy-free: true  |  Equitable: false  |  Proportional: true  |  Pareto-optimal: true\nEach party targets half of their own total valuation. Divisible items are fractionally split to reach that target; indivisible items go to the party that values them more.",
+        "label": "Split-the-difference (equitable compromise)",
+        "pareto_optimal": true,
+        "party_points": [
+          [
+            "maya",
+            65.0
+          ],
+          [
+            "theo",
+            75.0
+          ]
+        ],
+        "splits": []
       }
     ],
     "shared_core": [
@@ -129,11 +200,13 @@
       "detail": {
         "envy_free": true,
         "labels": [
-          "Adjusted Winner"
+          "Adjusted Winner (envy-free + equitable)",
+          "Max-min egalitarian (maximise worse-off party)",
+          "Split-the-difference (equitable compromise)"
         ],
-        "n_settlements": 1
+        "n_settlements": 3
       },
-      "hash": "5ff346d0ab0f4501ecdec61dacf005f7918fad0ba330a1cf3d94722ce75a593e",
+      "hash": "48d77d6dfc2a8588b8a0078d693d23066963e4a779786920518ed74a9545083a",
       "op": "fair_division",
       "prev_hash": "4c9d7411588bc73fb6b2d43f53c696d9fba4db5694873671c67c2f831ee31ae7",
       "seq": 4,

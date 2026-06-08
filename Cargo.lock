@@ -1601,7 +1601,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "ed25519-dalek",
  "maud",
+ "mediator-audit",
  "mediator-core",
  "mediator-fairdiv",
  "mediator-llm",

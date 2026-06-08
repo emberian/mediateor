@@ -135,6 +135,10 @@ pub struct AppState {
     /// id. Ephemeral (lost on restart) — fine for a demo behind auth.
     sessions: RwLock<HashMap<String, Session>>,
     next_sid: AtomicU64,
+    /// Server signing key for the tamper-evident audit records (ed25519,
+    /// ephemeral per process — each record carries its own public key, so it is
+    /// self-verifying regardless).
+    audit_key: ed25519_dalek::SigningKey,
 }
 
 impl AppState {
@@ -163,6 +167,7 @@ impl AppState {
             rate_limiter: RateLimiter::new(Duration::from_secs(4)),
             sessions: RwLock::new(HashMap::new()),
             next_sid: AtomicU64::new(1),
+            audit_key: mediator_audit::generate_keypair(),
         }
     }
 
@@ -235,6 +240,8 @@ pub fn router(state: AppState) -> Router {
         .route("/talk/:dispute_id/:party_id", get(talk_start))
         .route("/talk/:sid/:party_id/say", post(talk_say))
         .route("/talk/:sid/:party_id/where", get(talk_where))
+        .route("/audit/:dispute_id", get(audit_view))
+        .route("/audit/:dispute_id/download", get(audit_download))
         .route(
             "/settlement/:dispute_id/:idx/accept",
             post(settlement_accept),
@@ -668,6 +675,125 @@ const TALK_CSS: &str = r#"
 .where-btn { margin-top: .6rem; background: transparent; border: 1px solid #d8cbb6; border-radius: 12px; padding: .6rem 1rem; cursor: pointer; font: inherit; opacity: .9; }
 .where-btn:hover { background: #fbf6ee; opacity: 1; }
 @media (prefers-color-scheme: dark) { .talkin { background: #1f1d1a; color: #eee; border-color: #3a3328; } .where-btn { color: inherit; } .where-btn:hover { background: #2a2620; } }
+"#;
+
+// ───────────────────────────── the audit record ─────────────────────────────
+
+fn audit_record_for(
+    d: &LoadedDispute,
+    key: &ed25519_dalek::SigningKey,
+) -> mediator_audit::MediationRecord {
+    let events = vec![
+        (
+            "mediation_opened".to_string(),
+            serde_json::json!({
+                "dispute": d.id,
+                "title": d.dispute.title,
+                "parties": d.dispute.parties.iter().map(|p| &p.id).collect::<Vec<_>>(),
+            }),
+        ),
+        (
+            "crux_handed_back".to_string(),
+            serde_json::json!({ "crux": d.analysis.crux, "decided_by_kernel": false }),
+        ),
+    ];
+    mediator_audit::build(&d.receipts, &events, key)
+}
+
+async fn audit_view(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&id) else {
+        return not_found("We don't have a record of that dispute.");
+    };
+    let record = audit_record_for(d, &state.audit_key);
+    let verified = mediator_audit::verify(&record);
+
+    let markup = page(&format!("Audit record — {}", d.dispute.title), html! {
+        (brandbar(Some(html! { (&d.dispute.title) })))
+        style { (PreEscaped(AUDIT_CSS)) }
+        header .interior-head {
+            h1 { "The record" }
+            p .lede {
+                "Every fact this mediation leaned on, in a tamper-evident chain — each "
+                "link sealed by the hash of the one before it, the whole thing signed. "
+                "Anyone can check it wasn't altered after the fact. This is what lets a "
+                "process be trusted without a referee in the room."
+            }
+        }
+        section {
+            @match &verified {
+                Ok(()) => div .verify-ok { "✓ verified — this record is internally consistent and the signature is valid; it has not been altered since it was sealed." },
+                Err(e) => div .verify-bad { "✗ verification failed: " (e.to_string()) },
+            }
+        }
+        section {
+            table .audit-table {
+                thead { tr { th { "#" } th { "step" } th { "hash" } th { "verdict" } } }
+                tbody {
+                    @for e in &record.entries {
+                        tr {
+                            td { (e.seq) }
+                            td { (e.kind) }
+                            td .mono { (short_hex(&e.hash)) }
+                            td { @if let Some(v) = &e.verdict { (v) } @else { "—" } }
+                        }
+                    }
+                }
+            }
+        }
+        section .audit-sig {
+            div { span .k { "public key" } span .mono { (short_hex(&record.public_key)) } }
+            div { span .k { "signature" } span .mono { (short_hex(&record.signature)) } }
+            a .dl href=(format!("/audit/{}/download", d.id)) { "Download the signed record (JSON) →" }
+        }
+        p .session-foot { "Signature: ed25519 · chain: sha256. Verify it yourself with the downloaded record." }
+    });
+    (StatusCode::OK, markup).into_response()
+}
+
+async fn audit_download(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&id) else {
+        return (StatusCode::NOT_FOUND, "unknown dispute").into_response();
+    };
+    let record = audit_record_for(d, &state.audit_key);
+    let json = serde_json::to_string_pretty(&record).unwrap_or_default();
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "application/json"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"mediation-record.json\"",
+            ),
+        ],
+        json,
+    )
+        .into_response()
+}
+
+fn short_hex(s: &str) -> String {
+    if s.len() > 20 {
+        format!("{}…{}", &s[..10], &s[s.len() - 6..])
+    } else {
+        s.to_string()
+    }
+}
+
+const AUDIT_CSS: &str = r#"
+.verify-ok { background:#e9f3ec; color:#2f6b46; border:1px solid #cfe6d6; padding:.7rem 1rem; border-radius:12px; }
+.verify-bad { background:#fbeaea; color:#8a2b2b; border:1px solid #efcccc; padding:.7rem 1rem; border-radius:12px; }
+.audit-table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.92rem; }
+.audit-table th, .audit-table td { text-align:left; padding:.45rem .6rem; border-bottom:1px solid #00000010; }
+.audit-table th { opacity:.6; font-weight:500; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.audit-sig { margin-top:1rem; display:flex; flex-direction:column; gap:.4rem; }
+.audit-sig .k { display:inline-block; width:7rem; opacity:.6; }
+.audit-sig .dl { display:inline-block; margin-top:.6rem; }
 "#;
 
 // ─────────────────────────────── the gallery ─────────────────────────────────
@@ -1153,6 +1279,11 @@ async fn operator_view(
                 "ledger findings, the settlement table, and the receipt chain. "
                 "Everything here is provenance you can point at."
             }
+        }
+
+        section .audit-link {
+            style { (PreEscaped(".audit-link{margin:.2rem 0 1rem}.audit-link a{display:inline-block;padding:.55rem .95rem;border:1px solid #d8cbb6;border-radius:10px;text-decoration:none;color:inherit}.audit-link a:hover{background:#fbf6ee}")) }
+            a href=(format!("/audit/{}", d.id)) { "🔏 View the signed, tamper-evident record →" }
         }
 
         // ── Crux ─────────────────────────────────────────────────────────
