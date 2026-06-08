@@ -2,3 +2,9 @@ session "Mediator_Keystone" = HOL +
   description "First stone: the formalizable core of a dispute, held backstage."
   theories
     Keystone
+
+session "Mediator_Lib" in "lib" = HOL +
+  description "The normative layer: shallow deontic + Poole-style defeasible defaults."
+  theories
+    Mediator
+    Roommate
