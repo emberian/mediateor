@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mediator-types",
+    "crates/mediator-prover",
+    "crates/mediator-fairdiv",
+    "crates/mediator-core",
+    "crates/mediator-llm",
+    "crates/mediator-tui",
+    "crates/mediator-web",
+    "crates/mediator-demo",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+mediator-types = { path = "crates/mediator-types" }
+mediator-prover = { path = "crates/mediator-prover" }
+mediator-fairdiv = { path = "crates/mediator-fairdiv" }
+mediator-core = { path = "crates/mediator-core" }
+mediator-llm = { path = "crates/mediator-llm" }
+mediator-tui = { path = "crates/mediator-tui" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+sha2 = "0.10"

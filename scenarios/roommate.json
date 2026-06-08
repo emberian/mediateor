@@ -1,0 +1,79 @@
+{
+  "title": "Roommate security-deposit dispute — Robin moves out",
+  "parties": [
+    {
+      "id": "robin",
+      "display_name": "Robin (moving out)",
+      "signature": [
+        { "name": "stain_is_damage", "arg_sorts": [], "ret": "Bool",
+          "gloss": "the carpet stain counts as chargeable damage (vs. ordinary wear)" }
+      ]
+    },
+    {
+      "id": "sam",
+      "display_name": "Sam (staying, holds the deposit)",
+      "signature": [
+        { "name": "tenant_owes_carpet", "arg_sorts": [], "ret": "Bool",
+          "gloss": "Robin must bear the carpet repair cost" },
+        { "name": "claimed_total", "arg_sorts": [], "ret": "Int",
+          "gloss": "the total deduction Sam verbally claimed, in cents" }
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "r1", "party": "robin",
+      "nl": "The carpet stain was ordinary wear and tear, not damage I should pay for.",
+      "formula": { "Not": { "Atom": { "App": ["stain_is_damage", []] } } },
+      "english_render": "It is not the case that the carpet stain is chargeable damage.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s1", "party": "sam",
+      "nl": "The stain is damage Robin caused, so Robin owes the carpet repair.",
+      "formula": { "Atom": { "App": ["stain_is_damage", []] } },
+      "english_render": "The carpet stain is chargeable damage.",
+      "weight": 7, "defeasible": false, "active": true
+    },
+    {
+      "id": "s2", "party": "sam",
+      "nl": "I told Robin the total deductions would come to about five hundred dollars.",
+      "formula": { "Eq": [ { "App": ["claimed_total", []] }, { "IntLit": 50000 } ] },
+      "english_render": "Sam's claimed total of deductions is $500.00.",
+      "weight": 3, "defeasible": false, "active": true
+    }
+  ],
+  "stipulated": [
+    {
+      "Iff": [
+        { "Atom": { "App": ["tenant_owes_carpet", []] } },
+        { "Atom": { "App": ["stain_is_damage", []] } }
+      ]
+    }
+  ],
+  "ledger": {
+    "deposit_cents": 120000,
+    "items": [
+      { "id": "cleaning", "label": "Professional cleaning", "amount_cents": 15000,
+        "asserted_by": "sam", "disputed": false },
+      { "id": "carpet_repair", "label": "Carpet stain repair", "amount_cents": 30000,
+        "asserted_by": "sam", "disputed": true }
+    ]
+  },
+  "contested_items": [
+    { "id": "couch", "label": "The shared couch", "divisible": false },
+    { "id": "kitchenware", "label": "Kitchenware set", "divisible": false },
+    { "id": "standing_desk", "label": "Standing desk", "divisible": false },
+    { "id": "bookshelf", "label": "Bookshelf", "divisible": false }
+  ],
+  "valuations": [
+    { "party": "robin", "item": "couch", "points": 40 },
+    { "party": "robin", "item": "kitchenware", "points": 10 },
+    { "party": "robin", "item": "standing_desk", "points": 35 },
+    { "party": "robin", "item": "bookshelf", "points": 15 },
+    { "party": "sam", "item": "couch", "points": 25 },
+    { "party": "sam", "item": "kitchenware", "points": 30 },
+    { "party": "sam", "item": "standing_desk", "points": 30 },
+    { "party": "sam", "item": "bookshelf", "points": 15 }
+  ]
+}
