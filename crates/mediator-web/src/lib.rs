@@ -16,7 +16,8 @@
 mod load;
 mod theme;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,7 +31,9 @@ use axum::{
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Sig, Term};
-use mediator_session::{conduct, LiveBrain, ScriptedBrain, ScriptedInputs, Session};
+use mediator_session::{
+    conduct, LiveBrain, MediatorBrain, ScriptedBrain, ScriptedInputs, Session, Utterance,
+};
 use tokio::sync::RwLock;
 
 pub use load::{DisputeRecord, discover_disputes, load_record, scenarios_dir};
@@ -128,6 +131,10 @@ pub struct AppState {
     pub live_llm_enabled: bool,
     /// Simple global rate limiter for /formalize calls.
     rate_limiter: RateLimiter,
+    /// In-memory store of live interactive mediation sessions, keyed by a short
+    /// id. Ephemeral (lost on restart) — fine for a demo behind auth.
+    sessions: RwLock<HashMap<String, Session>>,
+    next_sid: AtomicU64,
 }
 
 impl AppState {
@@ -154,6 +161,8 @@ impl AppState {
             live_llm_enabled,
             // One call per 4 seconds globally — cheap but prevents spam.
             rate_limiter: RateLimiter::new(Duration::from_secs(4)),
+            sessions: RwLock::new(HashMap::new()),
+            next_sid: AtomicU64::new(1),
         }
     }
 
@@ -220,6 +229,8 @@ pub fn router(state: AppState) -> Router {
         .route("/party/:dispute_id/:party_id", get(party_view))
         .route("/operator/:dispute_id", get(operator_view))
         .route("/session/:dispute_id", get(mediation_session))
+        .route("/talk/:dispute_id/:party_id", get(talk_start))
+        .route("/talk/:sid/:party_id/say", post(talk_say))
         .route(
             "/settlement/:dispute_id/:idx/accept",
             post(settlement_accept),
@@ -438,6 +449,146 @@ const SESSION_CSS: &str = r#"
 .session-foot { margin-top: 1.6rem; font-size: .92rem; opacity: .8; }
 "#;
 
+// ──────────────────────── the interactive session (talk) ─────────────────────
+
+#[derive(serde::Deserialize)]
+struct TalkForm {
+    message: String,
+}
+
+/// Start a live, interactive caucus: the visitor speaks as one party and the
+/// mediator (live on the box, scripted locally) replies in real back-and-forth.
+async fn talk_start(
+    Path((dispute_id, party_id)): Path<(String, String)>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&dispute_id) else {
+        return not_found("We don't have a record of that dispute.");
+    };
+    let Some(party) = d.dispute.parties.iter().find(|p| p.id == party_id) else {
+        return not_found("That person isn't part of this dispute.");
+    };
+    let name = party_first_name(&party.display_name);
+
+    let sid = format!("s{}", state.next_sid.fetch_add(1, Ordering::Relaxed));
+    let session = Session::new(d.dispute.clone(), d.analysis.clone(), d.receipts.clone());
+    state.sessions.write().await.insert(sid.clone(), session);
+
+    let opener = format!(
+        "I'm really glad you're here, {name}. This is just between us — nothing you say \
+         is shared with the other person without your okay. Tell me, in your own words: \
+         what's going on?"
+    );
+    let say_url = format!("/talk/{}/{}/say", sid, party.id);
+
+    let markup = page(&format!("Talk it through — {}", d.dispute.title), html! {
+        (brandbar(Some(html! { (&d.dispute.title) })))
+        style { (PreEscaped(SESSION_CSS)) (PreEscaped(TALK_CSS)) }
+        header .interior-head {
+            h1 { "A private word with the mediator" }
+            p .lede {
+                "You're speaking as " strong { (party.display_name.clone()) } ". Say what's "
+                "on your mind — the mediator listens and reflects, has no stake in how this "
+                "turns out, and you can stop any time."
+            }
+        }
+        div #chat .chat {
+            div .b.med { span .who { "mediator" } p { (opener) } }
+        }
+        form .talkform hx-post=(say_url) hx-target="#chat" hx-swap="beforeend"
+             "hx-on::after-request"="this.reset(); this.querySelector('input').focus()" {
+            input .talkin type="text" name="message" autocomplete="off" required
+                  placeholder=(format!("Speak as {name}…"));
+            button type="submit" { "Say it" }
+        }
+        p .session-foot {
+            @if state.live_llm_enabled { "The mediator is Claude Haiku 4.5, live." }
+            @else { "The mediator is a scripted preview voice (the live model runs on the deployed site)." }
+        }
+    });
+    (StatusCode::OK, markup).into_response()
+}
+
+/// The visitor said something → append it, get the mediator's reply, return the
+/// exchange as an htmx fragment appended to the chat.
+async fn talk_say(
+    Path((sid, party_id)): Path<(String, String)>,
+    State(state): State<SharedState>,
+    Form(form): Form<TalkForm>,
+) -> impl IntoResponse {
+    let msg = form.message.trim().to_string();
+    if msg.is_empty() {
+        return (StatusCode::OK, html! {}).into_response();
+    }
+    if msg.chars().count() > 600 {
+        return (
+            StatusCode::OK,
+            html! { div .b.sys { p { "(let's keep it to a few sentences at a time)" } } },
+        )
+            .into_response();
+    }
+
+    // Snapshot the session for the brain; don't hold the lock across the model call.
+    let session = {
+        let map = state.sessions.read().await;
+        match map.get(&sid) {
+            Some(s) => s.clone(),
+            None => {
+                return (
+                    StatusCode::OK,
+                    html! { div .b.sys { p { "That conversation expired — start again from the seat picker." } } },
+                )
+                    .into_response()
+            }
+        }
+    };
+
+    let live = state.live_llm_enabled;
+    let p2 = party_id.clone();
+    let m2 = msg.clone();
+    let mv = tokio::task::spawn_blocking(move || {
+        if live {
+            if let Ok(b) = LiveBrain::new() {
+                return b.caucus(&session, &p2, &m2);
+            }
+        }
+        ScriptedBrain.caucus(&session, &p2, &m2)
+    })
+    .await
+    .expect("caucus task");
+
+    // Persist the exchange into the stored session.
+    {
+        let mut map = state.sessions.write().await;
+        if let Some(s) = map.get_mut(&sid) {
+            if let Some(th) = s.parties.iter_mut().find(|t| t.id == party_id) {
+                th.caucus.push(Utterance::party(&party_id, msg.clone()));
+                th.caucus.push(Utterance::mediator(mv.reply.clone()));
+                for i in &mv.interests {
+                    if !th.interests.contains(i) {
+                        th.interests.push(i.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let frag = html! {
+        div .b.party { span .who { "you" } p { (msg) } }
+        div .b.med { span .who { "mediator" } p { (mv.reply) } }
+    };
+    (StatusCode::OK, frag).into_response()
+}
+
+const TALK_CSS: &str = r#"
+.talkform { display: flex; gap: .5rem; margin: 1rem 0 .4rem; }
+.talkin { flex: 1; padding: .65rem .8rem; border-radius: 12px; border: 1px solid #d8cbb6; font: inherit; background: #fff; }
+.talkform button { padding: .65rem 1.1rem; border-radius: 12px; border: 0; background: #c06a3e; color: #fff; font: inherit; cursor: pointer; }
+.talkform button:hover { background: #a85a32; }
+#chat { min-height: 7rem; }
+@media (prefers-color-scheme: dark) { .talkin { background: #1f1d1a; color: #eee; border-color: #3a3328; } }
+"#;
+
 // ─────────────────────────────── the gallery ─────────────────────────────────
 
 async fn gallery(State(state): State<SharedState>) -> Markup {
@@ -556,6 +707,18 @@ async fn seat_picker(
                     "Watch a full mediation conducted end to end — the private "
                     "caucuses, the common ground, the one open question handed "
                     "back, and the fair options. The facts underneath are checked."
+                }
+            }
+        }
+
+        section .talk-invite {
+            style { (PreEscaped(".talk-invite{margin-top:1.5rem}.talk-links{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.55rem}.talk-link{padding:.55rem .95rem;border:1px solid #d8cbb6;border-radius:10px;text-decoration:none;color:inherit}.talk-link:hover{background:#fbf6ee}")) }
+            p { "Or try it yourself — speak privately with the mediator, live:" }
+            div .talk-links {
+                @for p in &d.dispute.parties {
+                    a .talk-link href=(format!("/talk/{}/{}", d.id, p.id)) {
+                        "Talk as " (party_first_name(&p.display_name))
+                    }
                 }
             }
         }

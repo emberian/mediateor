@@ -152,6 +152,44 @@ async fn session_route_renders_conducted_mediation() {
 }
 
 #[tokio::test]
+async fn interactive_talk_round_trip() {
+    let app = router(fixture_state());
+
+    // start a private talk as robin
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/robin").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    assert!(html.contains("A private word with the mediator"));
+
+    // pull the say-url (carries the freshly-created session id)
+    let say = html
+        .split("hx-post=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap_or("")
+        .to_string();
+    assert!(say.starts_with("/talk/s") && say.ends_with("/robin/say"), "say url: {say}");
+
+    // say something → get the mediator's reply as a fragment
+    let req = Request::builder()
+        .method("POST")
+        .uri(&say)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("message=the stain was already there when I moved in"))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let frag = body_string(resp).await;
+    assert!(frag.to_lowercase().contains("mediator"));
+    // offline → the deterministic scripted caucus reply
+    assert!(frag.contains("Thank you for telling me"));
+}
+
+#[tokio::test]
 async fn party_robin_returns_200_with_kind_copy() {
     let app = router(fixture_state());
     let resp = app
