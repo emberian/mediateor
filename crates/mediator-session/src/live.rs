@@ -15,9 +15,12 @@ use crate::{
 };
 use mediator_types::PartyId;
 
-/// The default mediator model — one consistent, warm voice (Claude Haiku 4.5),
-/// distinct from the multi-model council used for *formalizing* claims.
-pub const DEFAULT_MEDIATOR_MODEL: &str = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+/// The default mediator model — one consistent, warm voice carried by an
+/// **open-weights** model (Qwen3-VL-235B-A22B: 235B total, 22B active — denser-
+/// active than the old a3b), in keeping with the constitution's move to fully
+/// open weights so no single maker's bias is the law. Distinct from the multi-
+/// model council used for *formalizing* claims.
+pub const DEFAULT_MEDIATOR_MODEL: &str = "qwen.qwen3-vl-235b-a22b";
 pub const DEFAULT_REGION: &str = "us-east-1";
 
 pub struct LiveBrain {
@@ -90,22 +93,119 @@ impl MediatorBrain for LiveBrain {
         let user = format!(
             "You are in a PRIVATE caucus with {name} (the other person cannot see this). \
              {prior}They just said:\n\n\"{input}\"\n\nRespond as the mediator: reflect what \
-             you heard, and gently surface the interest *underneath* their position. Warm, \
-             a few sentences, ending with a soft check-in. Then, on a FINAL separate line, \
-             write exactly:\nINTEREST: <a short phrase naming the underlying interest>"
+             you heard, and give them room — do NOT rush them. If they are still venting or \
+             clearly have more to get out, invite more and don't move on. A few warm \
+             sentences ending with a soft check-in.\n\nThen, on FINAL separate lines, write \
+             exactly:\nINTEREST: <a short phrase naming the interest you hear under their \
+             position, to be checked back with them>\nHEARD_FULLY: <yes only if they seem \
+             to have been able to say their whole piece; otherwise no>"
         );
         match self.ask(&user) {
             Some(text) => {
-                let (reply, interest) = split_interest(&text);
+                let (reply, interest, heard_fully) = split_caucus_signals(&text);
                 CaucusMove {
                     reply,
-                    interests: interest.into_iter().collect(),
+                    interests: Vec::new(),
                     claims: Vec::new(),
                     done: true,
+                    heard_fully,
+                    // Named here, CHECKED BACK and confirmed in the loop — not
+                    // surfaced as a confirmed interest until the party owns it.
+                    interest_to_check: interest,
                 }
             }
             None => self.fallback.caucus(s, party, input),
         }
+    }
+
+    fn check_back_interest(&self, s: &Session, party: &PartyId) -> String {
+        let name = s.party_name(party);
+        let pending = s
+            .parties
+            .iter()
+            .find(|t| &t.id == party)
+            .and_then(|t| t.pending_interest.clone());
+        let Some(interest) = pending else {
+            return self.fallback.check_back_interest(s, party);
+        };
+        let user = format!(
+            "You are still in private caucus with {name}. You think the interest under their \
+             position is: \"{interest}\". CHECK IT BACK with them — name it plainly and ask \
+             if you've got it right, making clear their words are the ones that count and \
+             they should correct you if it's off. Two or three warm sentences, ending with a \
+             genuine question. Do not move past it."
+        );
+        self.ask(&user)
+            .unwrap_or_else(|| self.fallback.check_back_interest(s, party))
+    }
+
+    fn surface_factual_conflict(&self, s: &Session) -> String {
+        if s.factual_conflicts.is_empty() {
+            return self.fallback.surface_factual_conflict(s);
+        }
+        let mut items = String::new();
+        for c in &s.factual_conflicts {
+            items.push_str(&format!(
+                "- about {}: {} says \"{}\"; {} says \"{}\"\n",
+                c.about,
+                s.party_name(&c.between.0),
+                c.claims.0,
+                s.party_name(&c.between.1),
+                c.claims.1,
+            ));
+        }
+        let user = format!(
+            "Two people have put facts on the record that collide. Surface this honestly: \
+             name exactly what they disagree about, and be clear this is a question of FACT \
+             that needs evidence, not logic — and that you will NOT decide which of them is \
+             right, because that wouldn't be fair or honest. Reassure them you can keep \
+             working everything that doesn't hang on it. A few sentences, no bullet points. \
+             The collisions:\n{items}",
+        );
+        self.ask(&user)
+            .unwrap_or_else(|| self.fallback.surface_factual_conflict(s))
+    }
+
+    fn name_residue(&self, s: &Session) -> String {
+        let residue = if s.residue.is_empty() {
+            s.residue_candidates()
+        } else {
+            s.residue.clone()
+        };
+        let mut items = String::new();
+        for r in &residue {
+            items.push_str(&format!("- {r}\n"));
+        }
+        let user = format!(
+            "The money in this dispute has been handled and certified fair — that part is \
+             settled and can't be fudged. Now name the RESIDUE: the part that was never \
+             really about the money. Say it warmly and plainly so a frightened person can \
+             see it clearly — the money is handled; here is what's left, and it's human and \
+             it's theirs. Be explicit that you cannot and will not certify this part, and \
+             that naming it honestly is itself worth something. A few sentences. What's \
+             left:\n{items}",
+        );
+        self.ask(&user).unwrap_or_else(|| self.fallback.name_residue(s))
+    }
+
+    fn co_author_agreement(&self, s: &Session) -> String {
+        let names = party_names(s).join(" and ");
+        let crux = s
+            .analysis
+            .crux
+            .as_ref()
+            .map(|c| format!(" The one open question they decided together: \"{c}\"."))
+            .unwrap_or_default();
+        let user = format!(
+            "Help {names} CO-AUTHOR their agreement — in THEIR words, owned by both, not your \
+             verdict.{crux} Offer a plain, specific, mutual starting draft they can edit \
+             toward sign-off (write it as something they would say, first person plural). \
+             Make explicit that they should change any word until it's truly theirs, and \
+             that you only check it doesn't contradict the facts already settled — you never \
+             decide it's the *right* outcome. A short draft plus that invitation."
+        );
+        self.ask(&user)
+            .unwrap_or_else(|| self.fallback.co_author_agreement(s))
     }
 
     fn shared_ground(&self, s: &Session) -> String {
@@ -258,9 +358,12 @@ fn caucus_context(s: &Session, party: &PartyId) -> String {
     ctx
 }
 
-/// Split a model reply into (reply_without_interest_line, optional_interest).
-fn split_interest(text: &str) -> (String, Option<String>) {
+/// Split a model caucus reply into (reply_without_signal_lines, optional_interest,
+/// heard_fully). The model appends `INTEREST:` and `HEARD_FULLY:` control lines;
+/// these are stripped from the spoken reply and parsed out.
+fn split_caucus_signals(text: &str) -> (String, Option<String>, bool) {
     let mut interest = None;
+    let mut heard_fully = false;
     let mut kept = Vec::new();
     for line in text.lines() {
         let t = line.trim();
@@ -272,9 +375,16 @@ fn split_interest(text: &str) -> (String, Option<String>) {
             if !v.is_empty() {
                 interest = Some(v.to_string());
             }
+        } else if let Some(rest) = t
+            .strip_prefix("HEARD_FULLY:")
+            .or_else(|| t.strip_prefix("Heard_fully:"))
+            .or_else(|| t.strip_prefix("HEARD FULLY:"))
+        {
+            let v = rest.trim().to_lowercase();
+            heard_fully = v.starts_with('y') || v == "true";
         } else {
             kept.push(line);
         }
     }
-    (kept.join("\n").trim().to_string(), interest)
+    (kept.join("\n").trim().to_string(), interest, heard_fully)
 }

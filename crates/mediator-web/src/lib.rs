@@ -19,62 +19,178 @@ mod theme;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use axum::{
     Form,
     Router,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{ConnectInfo, Path, State},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Sig, Term};
+use mediator_types::{Analysis, Crux, Dispute, Formula, Party, Receipt, Settlement, Sig, Term};
 use mediator_session::{
-    conduct, LiveBrain, MediatorBrain, ScriptedBrain, ScriptedInputs, Session, Utterance,
+    conduct, next_action, Evidence, EvidenceKind, LiveBrain, MediatorAction, MediatorBrain,
+    ScriptedBrain, ScriptedInputs, Session, Utterance,
 };
+use std::net::SocketAddr;
 use tokio::sync::RwLock;
 
 pub use load::{DisputeRecord, discover_disputes, load_record, scenarios_dir};
 use theme::CSS;
 
-// ─────────────────────────── rate limiter ────────────────────────────────────
+// ─────────────────────────── rate limiting ───────────────────────────────────
+//
+// Two layers guard every endpoint that can reach a model (a caucus reply, the
+// "where this lands" recap, the live formalizer). The $50 AWS budget action is
+// the true backstop; *these* are the primary, friendly defense that lets the
+// Caddy password come off for a public demo:
+//
+//   1. a GLOBAL token bucket (a hard ceiling on model calls across all visitors),
+//   2. a PER-IP token bucket (so one peer can't monopolize or run up the bill),
+//
+// keyed on the peer IP — preferring the left-most `X-Forwarded-For` address that
+// Caddy sets, falling back to the socket address. All limits are env-tunable
+// (see `RateConfig::from_env`). A human who trips a limit gets a calm "one
+// moment…" fragment, never a bare 429.
 
-/// A very simple token-bucket rate limiter.
-/// Allows one call per `min_interval`; shared across all /formalize requests.
+/// A token bucket: `capacity` tokens, refilling at `refill_per_sec`. One model
+/// call costs one token. Cheap, lock-guarded, no background task.
+#[derive(Debug)]
+struct TokenBucket {
+    capacity: f64,
+    refill_per_sec: f64,
+    tokens: f64,
+    last: Instant,
+}
+
+impl TokenBucket {
+    fn new(capacity: f64, refill_per_sec: f64) -> Self {
+        Self { capacity, refill_per_sec, tokens: capacity, last: Instant::now() }
+    }
+
+    /// Try to spend one token. Refills lazily based on elapsed wall time.
+    fn try_take(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last).as_secs_f64();
+        self.last = now;
+        self.tokens = (self.tokens + elapsed * self.refill_per_sec).min(self.capacity);
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Tunable limits for the model-calling endpoints. Every value is overridable by
+/// an environment variable so the public box can be tightened without a rebuild.
+#[derive(Clone, Copy, Debug)]
+struct RateConfig {
+    /// Global burst capacity (tokens) across *all* visitors.
+    global_capacity: f64,
+    /// Global steady-state refill (tokens per second).
+    global_refill: f64,
+    /// Per-IP burst capacity (tokens) for a single peer.
+    per_ip_capacity: f64,
+    /// Per-IP steady-state refill (tokens per second).
+    per_ip_refill: f64,
+    /// Max distinct IP buckets kept in memory (oldest evicted past this).
+    max_ip_buckets: usize,
+}
+
+impl RateConfig {
+    fn from_env() -> Self {
+        // Defaults: a single visitor gets a burst of ~8 model calls, then ~1 every
+        // 5s; across everyone, a burst of 40 then ~2/sec. Comfortable for a real,
+        // unhurried conversation (you think between turns); hostile to a script
+        // hammering the endpoint. Tune any of these via env on the public box:
+        //   MEDIATEOR_RL_IP_BURST, MEDIATEOR_RL_IP_PER_SEC      (per peer IP)
+        //   MEDIATEOR_RL_GLOBAL_BURST, MEDIATEOR_RL_GLOBAL_PER_SEC (all visitors)
+        //   MEDIATEOR_RL_MAX_IPS (cap on tracked IP buckets)
+        fn num(key: &str, default: f64) -> f64 {
+            std::env::var(key).ok().and_then(|v| v.parse().ok()).filter(|v: &f64| *v > 0.0).unwrap_or(default)
+        }
+        fn usize_env(key: &str, default: usize) -> usize {
+            std::env::var(key).ok().and_then(|v| v.parse().ok()).filter(|v: &usize| *v > 0).unwrap_or(default)
+        }
+        RateConfig {
+            global_capacity: num("MEDIATEOR_RL_GLOBAL_BURST", 40.0),
+            global_refill: num("MEDIATEOR_RL_GLOBAL_PER_SEC", 2.0),
+            per_ip_capacity: num("MEDIATEOR_RL_IP_BURST", 8.0),
+            per_ip_refill: num("MEDIATEOR_RL_IP_PER_SEC", 0.2),
+            max_ip_buckets: usize_env("MEDIATEOR_RL_MAX_IPS", 4096),
+        }
+    }
+}
+
+/// The two-layer (global + per-IP) limiter behind every model-calling endpoint.
 struct RateLimiter {
-    min_interval: Duration,
-    last_allowed: Mutex<Option<Instant>>,
+    cfg: RateConfig,
+    global: Mutex<TokenBucket>,
+    per_ip: Mutex<HashMap<String, TokenBucket>>,
 }
 
 impl RateLimiter {
-    fn new(min_interval: Duration) -> Self {
+    fn new(cfg: RateConfig) -> Self {
         Self {
-            min_interval,
-            last_allowed: Mutex::new(None),
+            cfg,
+            global: Mutex::new(TokenBucket::new(cfg.global_capacity, cfg.global_refill)),
+            per_ip: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Returns `true` if the call is allowed (and records the time).
-    fn allow(&self) -> bool {
-        let mut guard = self.last_allowed.lock().unwrap();
-        let now = Instant::now();
-        match *guard {
-            None => {
-                *guard = Some(now);
-                true
+    /// Allow a model call from `ip`? Spends one global *and* one per-IP token.
+    /// (Spends global first; if the per-IP bucket is dry we don't refund the
+    /// global token — conservative, and the buckets refill on the same clock.)
+    fn allow(&self, ip: &str) -> bool {
+        {
+            let mut g = self.global.lock().unwrap();
+            if !g.try_take() {
+                return false;
             }
-            Some(last) => {
-                if now.duration_since(last) >= self.min_interval {
-                    *guard = Some(now);
-                    true
-                } else {
-                    false
-                }
+        }
+        let mut map = self.per_ip.lock().unwrap();
+        // Bound the table so a flood of distinct IPs can't grow it unboundedly.
+        if map.len() >= self.cfg.max_ip_buckets && !map.contains_key(ip) {
+            // Evict the bucket idle the longest (its `last` is furthest in the past).
+            if let Some(stale) = map.iter().min_by_key(|(_, b)| b.last).map(|(k, _)| k.clone()) {
+                map.remove(&stale);
+            }
+        }
+        let bucket = map
+            .entry(ip.to_string())
+            .or_insert_with(|| TokenBucket::new(self.cfg.per_ip_capacity, self.cfg.per_ip_refill));
+        bucket.try_take()
+    }
+}
+
+/// The friendly throttle fragment shown to a human who's gone too fast — a calm
+/// "one moment…", never a bare 429. Returned with 200 so htmx swaps it in place.
+fn one_moment() -> Markup {
+    html! {
+        div .b.sys .one-moment {
+            p { "One moment — let's not rush this. Take a breath; try again in a few seconds." }
+        }
+    }
+}
+
+/// The peer's IP for rate-limiting: the left-most `X-Forwarded-For` entry Caddy
+/// sets, else the real socket address. (Behind our own trusted Caddy, XFF is
+/// safe to trust; with no proxy we fall back to the connection's address.)
+fn client_ip(headers: &HeaderMap, conn: Option<SocketAddr>) -> String {
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = xff.split(',').next() {
+            let ip = first.trim();
+            if !ip.is_empty() {
+                return ip.to_string();
             }
         }
     }
+    conn.map(|c| c.ip().to_string()).unwrap_or_else(|| "unknown".to_string())
 }
 
 // ──────────────────────────────── AppState ───────────────────────────────────
@@ -129,8 +245,12 @@ pub struct AppState {
     pub disputes: Vec<LoadedDispute>,
     /// Whether the live LLM feature is enabled (env `MEDIATEOR_LIVE_LLM`).
     pub live_llm_enabled: bool,
-    /// Simple global rate limiter for /formalize calls.
+    /// Global + per-IP rate limiter guarding every model-calling endpoint.
     rate_limiter: RateLimiter,
+    /// Max characters accepted in a single utterance / exhibit / claim. A human
+    /// says a few sentences; this just keeps a payload from being abusive. Tunable
+    /// via `MEDIATEOR_MAX_INPUT_CHARS` (default 600, floor 40).
+    max_input_chars: usize,
     /// In-memory store of live interactive mediation sessions, keyed by a short
     /// id. Ephemeral (lost on restart) — fine for a demo behind auth.
     sessions: RwLock<HashMap<String, Session>>,
@@ -160,11 +280,16 @@ impl AppState {
                     && v.to_ascii_lowercase() != "no"
             })
             .unwrap_or(false);
+        let max_input_chars = std::env::var("MEDIATEOR_MAX_INPUT_CHARS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v: &usize| *v >= 40)
+            .unwrap_or(600);
         Self {
             disputes,
             live_llm_enabled,
-            // One call per 4 seconds globally — cheap but prevents spam.
-            rate_limiter: RateLimiter::new(Duration::from_secs(4)),
+            rate_limiter: RateLimiter::new(RateConfig::from_env()),
+            max_input_chars,
             sessions: RwLock::new(HashMap::new()),
             next_sid: AtomicU64::new(1),
             audit_key: mediator_audit::generate_keypair(),
@@ -177,6 +302,14 @@ impl AppState {
 
     pub fn is_empty(&self) -> bool {
         self.disputes.is_empty()
+    }
+
+    /// Test-only: install an explicit rate-limit config (so a burst test is
+    /// deterministic without racing on process-global env vars).
+    #[cfg(test)]
+    fn with_rate_config(mut self, cfg: RateConfig) -> Self {
+        self.rate_limiter = RateLimiter::new(cfg);
+        self
     }
 }
 
@@ -239,7 +372,10 @@ pub fn router(state: AppState) -> Router {
         .route("/session/:dispute_id", get(mediation_session))
         .route("/talk/:dispute_id/:party_id", get(talk_start))
         .route("/talk/:sid/:party_id/say", post(talk_say))
-        .route("/talk/:sid/:party_id/where", get(talk_where))
+        .route("/talk/:sid/:party_id/evidence", post(talk_evidence))
+        .route("/talk/:sid/:party_id/accept/:idx", post(talk_accept))
+        .route("/talk/:sid/:party_id/revise", post(talk_revise))
+        .route("/talk/:sid/:party_id/sign", post(talk_sign))
         .route("/audit/:dispute_id", get(audit_view))
         .route("/audit/:dispute_id/download", get(audit_download))
         .route(
@@ -306,9 +442,10 @@ fn money(cents: i64) -> String {
 // ─────────────────────────── the mediation session ──────────────────────────
 
 /// Conduct a full mediation over a dispute and render it as a readable session.
-/// On the box (`MEDIATEOR_LIVE_LLM` set) the model conducts it (Claude Haiku
-/// 4.5); otherwise a deterministic scripted voice. The certified facts and
-/// fair-division settlements are never model-invented — they're the trust spine.
+/// On the box (`MEDIATEOR_LIVE_LLM` set) the model conducts it (the open
+/// flagship, Qwen3-VL 235B); otherwise a deterministic scripted voice. The
+/// certified facts and fair-division settlements are never model-invented —
+/// they're the trust spine.
 async fn mediation_session(
     Path(id): Path<String>,
     State(state): State<SharedState>,
@@ -334,7 +471,7 @@ async fn mediation_session(
     .await
     .expect("session conduct task");
 
-    let voice = if live { "Claude Haiku 4.5" } else { "a scripted preview voice" };
+    let voice = if live { "Qwen3-VL 235B — open" } else { "a scripted preview voice" };
     let markup = page(
         &format!("Mediation — {}", out.title),
         render_session(&out, voice),
@@ -460,15 +597,399 @@ const SESSION_CSS: &str = r#"
 .session-foot { margin-top: 1.6rem; font-size: .92rem; opacity: .8; }
 "#;
 
-// ──────────────────────── the interactive session (talk) ─────────────────────
+// ════════════════════════ the room (interactive talk) ════════════════════════
+//
+// The centerpiece. Not a chat widget bolted onto a dashboard — *a room*. The
+// visitor sits with the mediator and speaks freely; the mediator listens, checks
+// the interest under the position *back* to them, weaves in any evidence, and —
+// only when the room is ready — steps the two of them through the certified
+// shared ground, the one open question (handed back), the subtraction ("here's
+// what was never about the money"), the fair options, and an agreement the
+// parties write in their own words.
+//
+// The flow is **not a fixed march**. After every human turn we ask
+// `mediator_session::next_action(&session)` what a real mediator would do next
+// and perform exactly that, looping through the autonomous moves and pausing at
+// the human checkpoints (confirm an interest, add evidence, accept an option,
+// sign the agreement). A late exhibit re-opens acknowledgement; the crux is never
+// reached before the person is heard. The certified facts underneath are the
+// trust spine — the mediator can't fudge a number or decide the crux.
 
 #[derive(serde::Deserialize)]
 struct TalkForm {
     message: String,
 }
 
-/// Start a live, interactive caucus: the visitor speaks as one party and the
-/// mediator (live on the box, scripted locally) replies in real back-and-forth.
+/// One rendered unit of the room's transcript, produced by the autonomous driver
+/// while it holds the (blocking-safe) brain. Rendered to maud *after* the
+/// blocking task returns, so no markup crosses the task boundary.
+enum Beat {
+    /// The mediator speaks (a caucus reply, a reflection, the crux, …).
+    Mediator(String),
+    /// A system aside (gentle, centered).
+    System(String),
+    /// The signature **subtraction** panel: the money is handled; here's the
+    /// residue that was never about money. One of the two things the parties
+    /// themselves shaped — kept visually central.
+    Residue(Vec<String>),
+    /// The honest **factual-conflict** surface — needs evidence, not logic.
+    /// Speech-led and calm, not an adjudication panel.
+    Conflict(Vec<ConflictView>),
+    /// Fair ways forward: the single most balanced one shown plainly, the rest
+    /// folded behind a quiet disclosure. Each acceptable in-session.
+    Options(Vec<OptionView>),
+    /// Open the co-authored agreement for the parties to shape and sign.
+    Draft { text: String, signed: Vec<String>, parties: Vec<(String, String)> },
+    /// The room has landed.
+    Landed(String),
+}
+
+struct ConflictView {
+    about: String,
+    a_name: String,
+    a_claim: String,
+    b_name: String,
+    b_claim: String,
+}
+
+struct OptionView {
+    idx: usize,
+    summary: String,
+    envy_free: bool,
+    equitable: bool,
+}
+
+/// Make a brain (live on the box if it initializes; the scripted floor otherwise).
+fn make_brain(live: bool) -> Box<dyn MediatorBrain> {
+    if live {
+        LiveBrain::new()
+            .map(|b| Box::new(b) as Box<dyn MediatorBrain>)
+            .unwrap_or_else(|_| Box::new(ScriptedBrain))
+    } else {
+        Box::new(ScriptedBrain)
+    }
+}
+
+/// Drive the session forward from its current state via `next_action`, performing
+/// the **autonomous** mediator moves (reflect, name crux, subtract, propose, …)
+/// and collecting the beats to render. Pauses — returns — at any move that needs
+/// the human (more space, a check-back to confirm, the invitation to agree, the
+/// co-authoring). Mutates `s` in place. Pure-ish: only the brain may call out.
+fn drive(s: &mut Session, brain: &dyn MediatorBrain) -> Vec<Beat> {
+    let mut beats = Vec::new();
+    // A generous bound; each branch makes progress or breaks, so this is just a
+    // belt-and-suspenders guard against a logic bug looping forever.
+    for _ in 0..32 {
+        match next_action(s) {
+            MediatorAction::Welcome => {
+                let intro = brain.intro(s);
+                s.joint_transcript.push(Utterance::mediator(intro.clone()));
+                s.events.push("intake".into());
+                beats.push(Beat::Mediator(intro));
+            }
+            // Needs the human: the mediator has asked; we wait for their reply.
+            MediatorAction::AskParty(_) => break,
+            MediatorAction::CheckBackInterest(_) => break,
+            MediatorAction::AcknowledgeEvidence => {
+                let msg = brain.acknowledge_evidence(s);
+                s.joint_transcript.push(Utterance::mediator(msg.clone()));
+                s.evidence_acknowledged = true;
+                s.events.push("acknowledge_evidence".into());
+                beats.push(Beat::Mediator(msg));
+            }
+            MediatorAction::SurfaceFactualConflict => {
+                let intro = brain.surface_factual_conflict(s);
+                let views: Vec<ConflictView> = s
+                    .factual_conflicts
+                    .iter()
+                    .map(|c| ConflictView {
+                        about: c.about.clone(),
+                        a_name: party_first_name(&s.party_name(&c.between.0)),
+                        a_claim: c.claims.0.clone(),
+                        b_name: party_first_name(&s.party_name(&c.between.1)),
+                        b_claim: c.claims.1.clone(),
+                    })
+                    .collect();
+                s.joint_transcript.push(Utterance::mediator(intro.clone()));
+                s.conflicts_surfaced = true;
+                s.events.push("factual_conflict".into());
+                beats.push(Beat::Mediator(intro));
+                beats.push(Beat::Conflict(views));
+            }
+            MediatorAction::ReflectSharedGround => {
+                // FOLDED INTO THE MEDIATOR'S VOICE. The mediator simply says, warmly,
+                // what the two already agree on — no certified bullet panel in the
+                // party's face. The shared ground lives backstage, in "see the record".
+                let msg = brain.shared_ground(s);
+                s.joint_transcript.push(Utterance::mediator(msg.clone()));
+                s.events.push("shared_ground".into());
+                beats.push(Beat::Mediator(msg));
+            }
+            MediatorAction::NameCrux => {
+                // FOLDED INTO THE MEDIATOR'S VOICE. The mediator just *says* "here's
+                // the one real question, and it's yours" — no predicate-list panel.
+                // The full crux machinery stays backstage in the audit record.
+                let msg = brain.crux(s);
+                s.joint_transcript.push(Utterance::mediator(msg.clone()));
+                s.crux_named = true;
+                s.events.push("crux".into());
+                beats.push(Beat::Mediator(msg));
+            }
+            MediatorAction::NameResidue => {
+                if s.residue.is_empty() {
+                    s.residue = s.residue_candidates();
+                }
+                // The residue is the signature *visual* — let the panel carry it
+                // (it has its own warm framing), rather than also dumping the long
+                // bulleted prose as a bubble. Record the spoken line in the
+                // transcript for the audit/voice, but render only the panel.
+                let msg = brain.name_residue(s);
+                let residue = s.residue.clone();
+                s.joint_transcript.push(Utterance::mediator(msg));
+                s.residue_named = true;
+                s.events.push("residue".into());
+                beats.push(Beat::Residue(residue));
+            }
+            MediatorAction::ProposeOptions => {
+                let drafts = brain.proposals(s);
+                for (i, d) in drafts.into_iter().enumerate() {
+                    s.proposals.push(mediator_session::Proposal {
+                        id: format!("p{}", i + 1),
+                        summary: d.summary,
+                        settlement: d.settlement,
+                        coherent: true,
+                        accepted_by: Vec::new(),
+                    });
+                }
+                let intro = brain.present_proposals(s);
+                s.joint_transcript.push(Utterance::mediator(intro.clone()));
+                s.events.push("proposals".into());
+                beats.push(Beat::Mediator(intro));
+                beats.push(Beat::Options(option_views(s)));
+            }
+            // Needs the human: invite, then wait for accept / counter / hold.
+            MediatorAction::InviteAgreement => break,
+            MediatorAction::CoAuthorAgreement => {
+                // Open the draft (idempotent) and present it for the parties to
+                // shape; then pause so they can edit and sign in their own words.
+                if s.draft_agreement.is_none() {
+                    let text = brain.co_author_agreement(s);
+                    s.open_draft_agreement(text.clone(), "mediator");
+                    s.joint_transcript.push(Utterance::mediator(text));
+                }
+                beats.push(draft_beat(s));
+                break;
+            }
+            MediatorAction::Escalate => {
+                s.escalate("the room asked for a human");
+                beats.push(Beat::System(
+                    "Handing this to a person, with the full record of everything so far. \
+                     You're not starting over — they'll arrive already knowing where you are."
+                        .into(),
+                ));
+                break;
+            }
+            MediatorAction::Close => {
+                let landed = s
+                    .proposals
+                    .iter()
+                    .find(|p| !p.accepted_by.is_empty())
+                    .cloned()
+                    .map(|p| brain.closing(s, &p))
+                    .unwrap_or_else(|| {
+                        "You've done the hard part — staying at the table. Everything \
+                         you leaned on was checked; the rest is yours."
+                            .to_string()
+                    });
+                beats.push(Beat::Landed(landed));
+                break;
+            }
+        }
+    }
+    beats
+}
+
+/// Map this session's open cruxes to kind, dispute-faithful questions. Prefers
+/// the multi-crux set (`Analysis.cruxes`); falls back to the single crux.
+fn crux_questions(s: &Session) -> Vec<String> {
+    if !s.analysis.cruxes.is_empty() {
+        return s
+            .analysis
+            .cruxes
+            .iter()
+            .map(|c| crux_view_question(&s.dispute, c))
+            .collect();
+    }
+    match &s.analysis.crux {
+        Some(c) => vec![crux_question_from(&s.dispute, &s.analysis, c)],
+        None => Vec::new(),
+    }
+}
+
+fn option_views(s: &Session) -> Vec<OptionView> {
+    s.proposals
+        .iter()
+        .enumerate()
+        .map(|(i, p)| OptionView {
+            idx: i,
+            summary: p.summary.clone(),
+            envy_free: p.settlement.as_ref().map(|x| x.envy_free).unwrap_or(false),
+            equitable: p.settlement.as_ref().map(|x| x.equitable).unwrap_or(false),
+        })
+        .collect()
+}
+
+/// Pick the *single most balanced* option to lead with: prefer one that's both
+/// envy-free and equitable, then envy-free, then equitable, else the first. The
+/// room leads with one calm suggestion rather than three demanding a choice; the
+/// others stay one quiet disclosure away.
+fn lead_option(opts: &[OptionView]) -> usize {
+    let score = |o: &OptionView| (o.envy_free as u8) + (o.equitable as u8);
+    // On a tie, keep the *earliest* option (the kernel's first, usually Adjusted
+    // Winner): only a strictly higher score displaces the current lead.
+    let mut lead = 0;
+    let mut best = opts.first().map(score).unwrap_or(0);
+    for (i, o) in opts.iter().enumerate().skip(1) {
+        let s = score(o);
+        if s > best {
+            best = s;
+            lead = i;
+        }
+    }
+    lead
+}
+
+/// One option, rendered plainly: a name, the human summary, and a warm accept.
+/// No fairness chips in the party's face — the fairness lives in the record.
+fn option_card(sid: &str, party: &str, o: &OptionView, lead: bool) -> Markup {
+    html! {
+        div .room-opt id=(format!("room-opt-{}", o.idx)) {
+            div .room-opt-head {
+                strong { @if lead { "A way forward" } @else { "Another way" } }
+            }
+            p .room-opt-sum { (o.summary) }
+            button .room-accept
+                hx-post=(format!("/talk/{sid}/{party}/accept/{}", o.idx))
+                hx-target="#room" hx-swap="beforeend" {
+                "This one works for me"
+            }
+        }
+    }
+}
+
+/// Render a sequence of beats to a chat fragment (appended into `#room`).
+fn render_beats(sid: &str, party: &str, beats: &[Beat]) -> Markup {
+    html! {
+        @for b in beats { (render_beat(sid, party, b)) }
+    }
+}
+
+fn render_beat(sid: &str, party: &str, beat: &Beat) -> Markup {
+    match beat {
+        Beat::Mediator(t) => html! { div .b.med { span .who { "mediator" } p { (t) } } },
+        Beat::System(t) => html! { div .b.sys { p { (t) } } },
+        Beat::Conflict(views) => html! {
+            // Speech-led, not an adjudication panel: a quiet aside in the room, the
+            // colliding accounts set side by side, and the mediator's honest line
+            // that this is the one thing it won't decide.
+            div .b.med .conflict {
+                span .who { "mediator" }
+                @for c in views {
+                    p .conflict-about { "On " strong { (c.about) } ", the two of you remember it differently:" }
+                    div .conflict-claims {
+                        div .conflict-claim { span .who { (c.a_name) } p { "“" (c.a_claim) "”" } }
+                        div .conflict-claim { span .who { (c.b_name) } p { "“" (c.b_claim) "”" } }
+                    }
+                }
+                p {
+                    "That's a question of fact, and a question of fact needs evidence — "
+                    "not argument, and not me. I won't decide which of you is right; that "
+                    "wouldn't be fair or honest. We'll keep working everything that doesn't hang on it."
+                }
+            }
+        },
+        Beat::Residue(items) => html! {
+            // KEPT CENTRAL. The subtraction the parties themselves uncovered — the
+            // money is handled; here's what was never about money. Plain, quiet,
+            // beautiful; no machine vocabulary in the party's face.
+            div .panel .panel-residue {
+                div .panel-head {
+                    span .residue-mark { "—" }
+                    span .panel-kicker { "the money is handled. here's what was never about money." }
+                }
+                ul .residue-list { @for it in items { li { (it) } } }
+                p .panel-note {
+                    "The money part is settled, and it's fair — that's done. What's left "
+                    "isn't something a number can settle, and I won't pretend it could. But "
+                    "naming it is worth something: it's the real thing, and it's yours."
+                }
+            }
+        },
+        Beat::Options(opts) => {
+            // LEAD WITH ONE. The room offers a single, balanced way forward — calm,
+            // not a wall of three demanding a choice. The other fair splits are one
+            // quiet disclosure away for anyone who wants to compare.
+            let lead = lead_option(opts);
+            let rest: Vec<&OptionView> = opts.iter().enumerate().filter(|(i, _)| *i != lead).map(|(_, o)| o).collect();
+            html! {
+                div .room-options {
+                    @if let Some(o) = opts.get(lead) { (option_card(sid, party, o, true)) }
+                    @if !rest.is_empty() {
+                        details .more-options {
+                            summary { @if rest.len() == 1 { "see another fair split" } @else { "see " (rest.len()) " other fair splits" } }
+                            @for o in &rest { (option_card(sid, party, o, false)) }
+                        }
+                    }
+                    p .options-note { "It's a fair starting point, and it works whichever way the open question goes. Take it, change it, or hold — your call." }
+                }
+            }
+        },
+        Beat::Draft { text, signed, parties } => {
+            let revise_url = format!("/talk/{sid}/{party}/revise");
+            let sign_url = format!("/talk/{sid}/{party}/sign");
+            let all_signed = !parties.is_empty() && parties.iter().all(|(id, _)| signed.contains(id));
+            html! {
+                div #draft .panel .panel-draft {
+                    div .panel-head { span .panel-kicker { "write it down together — in your words" } }
+                    form .draft-form hx-post=(revise_url) hx-target="#draft" hx-swap="outerHTML" {
+                        textarea .draft-text name="message" rows="7" { (text) }
+                        div .draft-actions {
+                            button .btn .btn-counter type="submit" { "Save these words" }
+                            button .btn .btn-accept type="button"
+                                hx-post=(sign_url) hx-target="#draft" hx-swap="outerHTML" {
+                                @if signed.iter().any(|s| s == party) { "Signed ✓" } @else { "Sign it as it stands" }
+                            }
+                        }
+                    }
+                    div .draft-status {
+                        @if signed.is_empty() {
+                            p .panel-note { "Change any word until it says what you both mean. Editing it clears any signatures — a changed agreement has to be re-owned by both." }
+                        } @else {
+                            p .panel-note {
+                                @if all_signed { "Signed and owned by both: " } @else { "Signed so far: " }
+                                @for (i, (id, name)) in parties.iter().enumerate() {
+                                    @if i > 0 { ", " }
+                                    @let did = signed.contains(id);
+                                    span .sign-name .signed[did] { (name) @if did { " ✓" } }
+                                }
+                                ". I only check it doesn't contradict the facts already settled — I never decide it's the right outcome. That was always yours."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Beat::Landed(t) => html! {
+            div .panel .panel-landed {
+                div .panel-head { span .panel-kicker { "landed" } }
+                p .landed-text { (t) }
+            }
+        },
+    }
+}
+
+/// Start the room: the visitor takes a seat and the mediator opens. Renders the
+/// full calm page (the chat scaffold, the say box, the evidence drawer).
 async fn talk_start(
     Path((dispute_id, party_id)): Path<(String, String)>,
     State(state): State<SharedState>,
@@ -480,12 +1001,17 @@ async fn talk_start(
         return not_found("That person isn't part of this dispute.");
     };
     let name = party_first_name(&party.display_name);
+    let other = d
+        .dispute
+        .parties
+        .iter()
+        .find(|p| p.id != party_id)
+        .map(|p| party_first_name(&p.display_name))
+        .unwrap_or_else(|| "the other person".to_string());
 
     let sid = format!("s{}", state.next_sid.fetch_add(1, Ordering::Relaxed));
     let session = Session::new(d.dispute.clone(), d.analysis.clone(), d.receipts.clone());
     {
-        // Bound the in-memory store so the public box can't grow unboundedly from
-        // many session starts: at the cap, evict the oldest (lowest sid number).
         let mut map = state.sessions.write().await;
         if map.len() >= MAX_SESSIONS {
             if let Some(oldest) = map
@@ -500,47 +1026,75 @@ async fn talk_start(
     }
 
     let opener = format!(
-        "I'm really glad you're here, {name}. This is just between us — nothing you say \
-         is shared with the other person without your okay. Tell me, in your own words: \
-         what's going on?"
+        "I'm really glad you're here, {name}. Take your time — there's no clock in this \
+         room. This part is just between us; nothing you say reaches {other} without your \
+         okay. So tell me, in your own words: what's going on?"
     );
     let say_url = format!("/talk/{}/{}/say", sid, party.id);
+    let ev_url = format!("/talk/{}/{}/evidence", sid, party.id);
 
-    let markup = page(&format!("Talk it through — {}", d.dispute.title), html! {
-        (brandbar(Some(html! { (&d.dispute.title) })))
-        style { (PreEscaped(SESSION_CSS)) (PreEscaped(TALK_CSS)) }
-        header .interior-head {
-            h1 { "A private word with the mediator" }
+    let markup = page(&format!("The room — {}", d.dispute.title), html! {
+        (brandbar(Some(html! { a href=(format!("/dispute/{}", d.id)) { (&d.dispute.title) } })))
+        style { (PreEscaped(ROOM_CSS)) }
+        header .room-head {
+            p .eyebrow { "you are " (party.display_name.clone()) }
+            h1 { "The room" }
             p .lede {
-                "You're speaking as " strong { (party.display_name.clone()) } ". Say what's "
-                "on your mind — the mediator listens and reflects, has no stake in how this "
-                "turns out, and you can stop any time."
+                "A calm, private place to be heard. There's no clock and no judgement. "
+                "The mediator has no stake in how this lands, and you can pause or ask for "
+                "a person any time."
             }
         }
-        div #chat .chat {
+
+        div #room .room {
             div .b.med { span .who { "mediator" } p { (opener) } }
         }
-        form .talkform hx-post=(say_url) hx-target="#chat" hx-swap="beforeend"
-             "hx-on::after-request"="this.reset(); this.querySelector('input').focus()" {
-            input .talkin type="text" name="message" autocomplete="off" required
-                  placeholder=(format!("Speak as {name}…"));
-            button type="submit" { "Say it" }
+
+        form .room-form hx-post=(say_url) hx-target="#room" hx-swap="beforeend"
+             "hx-on::after-request"="this.reset(); this.querySelector('textarea').focus(); window.scrollTo(0, document.body.scrollHeight);" {
+            textarea .room-in name="message" autocomplete="off" required rows="2"
+                  placeholder=(format!("Speak as {name}…  (take your time)")) {}
+            button .room-say type="submit" { "Say it" }
         }
-        button .where-btn hx-get=(format!("/talk/{}/{}/where", sid, party.id))
-               hx-target="#chat" hx-swap="beforeend" {
-            "When you're ready — see where this could land →"
+
+        details .evidence-drawer {
+            summary { "Add something to the record — your account, a fact, or an exhibit" }
+            form .evidence-form hx-post=(ev_url) hx-target="#room" hx-swap="beforeend"
+                 "hx-on::after-request"="this.reset(); window.scrollTo(0, document.body.scrollHeight);" {
+                div .evidence-row {
+                    select .evidence-kind name="kind" {
+                        option value="statement" { "My account (my side, in my words)" }
+                        option value="fact" { "A specific fact (a number, a date, a measurement)" }
+                        option value="artifact" { "An exhibit (a photo, a receipt, a clause)" }
+                    }
+                }
+                input .evidence-text name="text" autocomplete="off"
+                      placeholder="What is it? (e.g. “the stain is 30cm across”, or “photo of the carpet”)";
+                input .evidence-note name="note" autocomplete="off"
+                      placeholder="Optional note or link (for an exhibit)";
+                button .btn .btn-counter type="submit" { "Put it on the record" }
+            }
+            p .evidence-caption {
+                "The mediator weighs everything on the record and acknowledges it — so you "
+                "feel heard — but it never lets evidence decide the open question. That stays yours."
+            }
         }
+
         p .session-foot {
-            @if state.live_llm_enabled { "The mediator is Claude Haiku 4.5, live." }
-            @else { "The mediator is a scripted preview voice (the live model runs on the deployed site)." }
+            @if state.live_llm_enabled { "The mediator's voice is Qwen3-VL 235B — an open model, live. " }
+            @else { "The mediator is a scripted preview voice here (the live model runs on the deployed site). " }
+            a .record-link href=(format!("/audit/{}", d.id)) { "see the record" }
+            " — the quiet, checkable account of everything underneath."
         }
     });
     (StatusCode::OK, markup).into_response()
 }
 
-/// The visitor said something → append it, get the mediator's reply, return the
-/// exchange as an htmx fragment appended to the chat.
+/// The visitor said something. Append it, let the mediator reply in caucus, then
+/// **drive the readiness-based flow forward** and render every resulting beat.
 async fn talk_say(
+    headers: HeaderMap,
+    conn: Option<ConnectInfo<SocketAddr>>,
     Path((sid, party_id)): Path<(String, String)>,
     State(state): State<SharedState>,
     Form(form): Form<TalkForm>,
@@ -549,132 +1103,429 @@ async fn talk_say(
     if msg.is_empty() {
         return (StatusCode::OK, html! {}).into_response();
     }
-    if msg.chars().count() > 600 {
+    if msg.chars().count() > state.max_input_chars {
         return (
             StatusCode::OK,
-            html! { div .b.sys { p { "(let's keep it to a few sentences at a time)" } } },
+            html! { div .b.sys { p { "(let's keep it to a few sentences at a time — say a little, and we'll go from there)" } } },
         )
             .into_response();
     }
 
-    // Snapshot the session for the brain; don't hold the lock across the model call.
+    // Per-IP + global rate limit on this model-calling endpoint.
+    let ip = client_ip(&headers, conn.map(|c| c.0));
+    if !state.rate_limiter.allow(&ip) {
+        return (StatusCode::OK, one_moment()).into_response();
+    }
+
     let session = {
         let map = state.sessions.read().await;
         match map.get(&sid) {
             Some(s) => s.clone(),
-            None => {
-                return (
-                    StatusCode::OK,
-                    html! { div .b.sys { p { "That conversation expired — start again from the seat picker." } } },
-                )
-                    .into_response()
-            }
+            None => return (StatusCode::OK, expired_fragment()).into_response(),
         }
     };
 
     let live = state.live_llm_enabled;
     let p2 = party_id.clone();
     let m2 = msg.clone();
-    let mv = tokio::task::spawn_blocking(move || {
-        if live {
-            if let Ok(b) = LiveBrain::new() {
-                return b.caucus(&session, &p2, &m2);
-            }
-        }
-        ScriptedBrain.caucus(&session, &p2, &m2)
-    })
-    .await
-    .expect("caucus task");
 
-    // Persist the exchange into the stored session.
-    {
-        let mut map = state.sessions.write().await;
-        if let Some(s) = map.get_mut(&sid) {
-            if let Some(th) = s.parties.iter_mut().find(|t| t.id == party_id) {
-                th.caucus.push(Utterance::party(&party_id, msg.clone()));
-                th.caucus.push(Utterance::mediator(mv.reply.clone()));
-                for i in &mv.interests {
-                    if !th.interests.contains(i) {
-                        th.interests.push(i.clone());
-                    }
+    // All brain work + session driving happens off the async executor and is
+    // returned as data; maud rendering stays out of the blocking task.
+    let driven = tokio::task::spawn_blocking(move || {
+        let brain = make_brain(live);
+        let mut s = session;
+
+        // Was the mediator mid-check-back? Then this turn confirms the interest.
+        let pending_check = s.needs_interest_check_back();
+        // Has this party already confirmed an interest? Then we don't open a fresh
+        // check-back loop on later turns — the interest is owned; we just reflect.
+        let already_confirmed = s
+            .parties
+            .iter()
+            .find(|t| t.id == p2)
+            .map(|t| t.confirmed_interest.is_some())
+            .unwrap_or(false);
+
+        let mv = brain.caucus(&s, &p2, &m2);
+        if let Some(th) = s.parties.iter_mut().find(|t| t.id == p2) {
+            th.caucus.push(Utterance::party(&p2, m2.clone()));
+            th.caucus.push(Utterance::mediator(mv.reply.clone()));
+            for i in &mv.interests {
+                if !th.interests.contains(i) {
+                    th.interests.push(i.clone());
                 }
             }
+            if mv.heard_fully {
+                th.heard_fully = true;
+            }
         }
+
+        let mut beats = vec![Beat::Mediator(mv.reply)];
+
+        // If a check-back was owed, the human's message just confirmed it (their
+        // words win, per the brain's discipline) — promote it and move on.
+        if pending_check.as_deref() == Some(p2.as_str()) {
+            s.confirm_interest(&p2, Some(m2.clone()));
+        }
+
+        // The brain may newly name an interest to check back — but only open that
+        // loop once per party. If they've already confirmed one (this turn or
+        // earlier), we don't keep re-checking; the interest is owned and we move on.
+        let just_confirmed = pending_check.as_deref() == Some(p2.as_str());
+        if let Some(interest) = mv.interest_to_check {
+            if !already_confirmed && !just_confirmed {
+                s.name_interest(&p2, &interest);
+                let cb = brain.check_back_interest(&s, &p2);
+                if let Some(th) = s.parties.iter_mut().find(|t| t.id == p2) {
+                    th.caucus.push(Utterance::mediator(cb.clone()));
+                }
+                beats.push(Beat::Mediator(cb));
+            }
+        }
+
+        // Now run the autonomous moves the room is ready for.
+        beats.extend(drive(&mut s, brain.as_ref()));
+        (s, beats)
+    })
+    .await
+    .expect("room turn task");
+
+    let (new_session, beats) = driven;
+    {
+        let mut map = state.sessions.write().await;
+        map.insert(sid.clone(), new_session);
     }
 
     let frag = html! {
         div .b.party { span .who { "you" } p { (msg) } }
-        div .b.med { span .who { "mediator" } p { (mv.reply) } }
+        (render_beats(&sid, &party_id, &beats))
     };
     (StatusCode::OK, frag).into_response()
 }
 
-/// "Where this could land": the mediator steps back from the private caucus and
-/// shows the certified shared ground, the crux (handed back), and the fair
-/// options — tying the felt conversation to the trustworthy resolution.
-async fn talk_where(
-    Path((sid, _party)): Path<(String, String)>,
+#[derive(serde::Deserialize)]
+struct EvidenceForm {
+    kind: String,
+    text: String,
+    #[serde(default)]
+    note: String,
+}
+
+/// The visitor adds evidence to the record. Stored on their thread; the mediator
+/// re-weaves and acknowledges it (and, if it collides with the other side's fact,
+/// surfaces the honest factual conflict). Drives the flow so the acknowledgement
+/// and any conflict surface appear immediately.
+async fn talk_evidence(
+    headers: HeaderMap,
+    conn: Option<ConnectInfo<SocketAddr>>,
+    Path((sid, party_id)): Path<(String, String)>,
     State(state): State<SharedState>,
+    Form(form): Form<EvidenceForm>,
 ) -> impl IntoResponse {
+    let text = form.text.trim().to_string();
+    if text.is_empty() {
+        return (StatusCode::OK, html! {}).into_response();
+    }
+    if text.chars().count() > state.max_input_chars {
+        return (
+            StatusCode::OK,
+            html! { div .b.sys { p { "(let's keep each exhibit short — a line or two)" } } },
+        )
+            .into_response();
+    }
+    let ip = client_ip(&headers, conn.map(|c| c.0));
+    if !state.rate_limiter.allow(&ip) {
+        return (StatusCode::OK, one_moment()).into_response();
+    }
+
+    let note = {
+        let n = form.note.trim();
+        if n.is_empty() { None } else { Some(n.chars().take(state.max_input_chars).collect::<String>()) }
+    };
+    let ev = match form.kind.as_str() {
+        "fact" => Evidence::fact(&party_id, text.clone()),
+        "artifact" => Evidence::artifact(&party_id, text.clone(), note),
+        _ => {
+            let mut e = Evidence::statement(&party_id, text.clone());
+            e.note = note;
+            e
+        }
+    };
+    let kind_word = match ev.kind {
+        EvidenceKind::Statement => "your account",
+        EvidenceKind::Fact => "that fact",
+        EvidenceKind::Artifact => "that exhibit",
+    }
+    .to_string();
+    let ev_render = ev.render();
+
     let session = {
         let map = state.sessions.read().await;
         match map.get(&sid) {
             Some(s) => s.clone(),
-            None => {
-                return (
-                    StatusCode::OK,
-                    html! { div .b.sys { p { "That conversation expired — start again from the seat picker." } } },
-                )
-                    .into_response()
-            }
+            None => return (StatusCode::OK, expired_fragment()).into_response(),
         }
     };
 
     let live = state.live_llm_enabled;
-    let (shared, crux, opts) = tokio::task::spawn_blocking(move || {
-        let brain: Box<dyn MediatorBrain> = if live {
-            LiveBrain::new()
-                .map(|b| Box::new(b) as Box<dyn MediatorBrain>)
-                .unwrap_or_else(|_| Box::new(ScriptedBrain))
+    let driven = tokio::task::spawn_blocking(move || {
+        let brain = make_brain(live);
+        let mut s = session;
+        let stored = s.submit_evidence(ev).is_ok();
+        let mut beats = Vec::new();
+        if stored {
+            beats.push(Beat::System(format!("Added to the record — {ev_render}.")));
+            beats.extend(drive(&mut s, brain.as_ref()));
         } else {
-            Box::new(ScriptedBrain)
-        };
-        let shared = brain.shared_ground(&session);
-        let crux = brain.crux(&session);
-        let opts: Vec<String> = brain.proposals(&session).into_iter().map(|d| d.summary).collect();
-        (shared, crux, opts)
+            beats.push(Beat::System(
+                "I couldn't attach that — let's keep going and you can tell me about it.".into(),
+            ));
+        }
+        (s, beats, stored)
     })
     .await
-    .expect("where task");
+    .expect("evidence task");
+
+    let (new_session, beats, _stored) = driven;
+    {
+        let mut map = state.sessions.write().await;
+        map.insert(sid.clone(), new_session);
+    }
 
     let frag = html! {
-        div .b.med { span .who { "mediator" } p { "Okay — let me step back and show you the bigger picture, with both sides in view." } }
-        div .b.med { span .who { "mediator" } p { (shared) } }
-        div .b.med { span .who { "mediator" } p { (crux) } }
-        @if !opts.is_empty() {
-            div .session-options {
-                @for o in &opts {
-                    div .opt { span .opt-badge { "fair · certified" } span .opt-sum { (o) } }
-                }
-            }
-        }
-        p .session-foot {
-            "Every fact shown here was checked by the prover — the mediator can't "
-            "fudge a number or invent a fact. The open question above is yours to answer."
-        }
+        div .b.party { span .who { "you" } p { "I'd like to put " (kind_word) " on the record: " (text) } }
+        (render_beats(&sid, &party_id, &beats))
     };
     (StatusCode::OK, frag).into_response()
 }
 
-const TALK_CSS: &str = r#"
-.talkform { display: flex; gap: .5rem; margin: 1rem 0 .4rem; }
-.talkin { flex: 1; padding: .65rem .8rem; border-radius: 12px; border: 1px solid #d8cbb6; font: inherit; background: #fff; }
-.talkform button { padding: .65rem 1.1rem; border-radius: 12px; border: 0; background: #c06a3e; color: #fff; font: inherit; cursor: pointer; }
-.talkform button:hover { background: #a85a32; }
-#chat { min-height: 7rem; }
-.where-btn { margin-top: .6rem; background: transparent; border: 1px solid #d8cbb6; border-radius: 12px; padding: .6rem 1rem; cursor: pointer; font: inherit; opacity: .9; }
-.where-btn:hover { background: #fbf6ee; opacity: 1; }
-@media (prefers-color-scheme: dark) { .talkin { background: #1f1d1a; color: #eee; border-color: #3a3328; } .where-btn { color: inherit; } .where-btn:hover { background: #2a2620; } }
+/// The visitor accepts a certified-fair option in-session. Records it, then opens
+/// the co-authored agreement (the parties make the words theirs and sign).
+async fn talk_accept(
+    Path((sid, party_id, idx)): Path<(String, String, usize)>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let live = state.live_llm_enabled;
+    let session = {
+        let map = state.sessions.read().await;
+        match map.get(&sid) {
+            Some(s) => s.clone(),
+            None => return (StatusCode::OK, expired_fragment()).into_response(),
+        }
+    };
+    let pid = party_id.clone();
+    let driven = tokio::task::spawn_blocking(move || {
+        let brain = make_brain(live);
+        let mut s = session;
+        let mut beats = Vec::new();
+        if let Some(p) = s.proposals.get_mut(idx) {
+            if !p.accepted_by.contains(&pid) {
+                p.accepted_by.push(pid.clone());
+            }
+            beats.push(Beat::System(format!(
+                "Noted — Option {} works for you. The other party will see that you're \
+                 okay with it, never your reasons.",
+                idx + 1
+            )));
+        }
+        beats.extend(drive(&mut s, brain.as_ref()));
+        (s, beats)
+    })
+    .await
+    .expect("accept task");
+    let (new_session, beats) = driven;
+    {
+        let mut map = state.sessions.write().await;
+        map.insert(sid.clone(), new_session);
+    }
+    (StatusCode::OK, render_beats(&sid, &party_id, &beats)).into_response()
+}
+
+/// The visitor revises the co-authored agreement text (their words). Clears
+/// signatures — a changed agreement must be re-owned by both — and re-renders the
+/// draft panel in place. (No model call here, so no rate-limit; the length cap
+/// still bounds the input.)
+async fn talk_revise(
+    Path((sid, party_id)): Path<(String, String)>,
+    State(state): State<SharedState>,
+    Form(form): Form<TalkForm>,
+) -> impl IntoResponse {
+    let text = form.message.trim().to_string();
+    if text.is_empty() {
+        return (StatusCode::OK, expired_fragment()).into_response();
+    }
+    // The agreement can be a paragraph; allow generous room, still bounded.
+    let text: String = text.chars().take(state.max_input_chars.max(2000)).collect();
+
+    let mut map = state.sessions.write().await;
+    let Some(s) = map.get_mut(&sid) else {
+        drop(map);
+        return (StatusCode::OK, expired_fragment()).into_response();
+    };
+    s.revise_draft(&party_id, text);
+    let beat = draft_beat(s);
+    drop(map);
+    (StatusCode::OK, render_beat(&sid, &party_id, &beat)).into_response()
+}
+
+/// The visitor signs the current agreement text. If both have now signed, the
+/// room lands; otherwise the draft panel updates to show who's signed.
+async fn talk_sign(
+    Path((sid, party_id)): Path<(String, String)>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let live = state.live_llm_enabled;
+    let session = {
+        let map = state.sessions.read().await;
+        match map.get(&sid) {
+            Some(s) => s.clone(),
+            None => return (StatusCode::OK, expired_fragment()).into_response(),
+        }
+    };
+    let pid = party_id.clone();
+    let driven = tokio::task::spawn_blocking(move || {
+        let brain = make_brain(live);
+        let mut s = session;
+        s.sign_draft(&pid);
+        let draft = draft_beat(&s);
+        let mut beats = vec![draft];
+        if s.agreement_owned() {
+            beats.extend(drive(&mut s, brain.as_ref()));
+        }
+        (s, beats)
+    })
+    .await
+    .expect("sign task");
+    let (new_session, beats) = driven;
+    {
+        let mut map = state.sessions.write().await;
+        map.insert(sid.clone(), new_session);
+    }
+    // The first beat re-renders #draft in place; any landed beat appends after.
+    let head = render_beat(&sid, &party_id, &beats[0]);
+    let rest = render_beats(&sid, &party_id, &beats[1..]);
+    (StatusCode::OK, html! { (head) (rest) }).into_response()
+}
+
+/// Build the draft beat for a session (the co-authoring panel, with sign state).
+fn draft_beat(s: &Session) -> Beat {
+    Beat::Draft {
+        text: s.draft_agreement.as_ref().map(|d| d.text.clone()).unwrap_or_default(),
+        signed: s.draft_agreement.as_ref().map(|d| d.signed_by.clone()).unwrap_or_default(),
+        parties: s
+            .parties
+            .iter()
+            .map(|t| (t.id.clone(), party_first_name(&t.display_name)))
+            .collect(),
+    }
+}
+
+fn expired_fragment() -> Markup {
+    html! {
+        div .b.sys { p { "This conversation has wound down — start a fresh one from the seat picker whenever you're ready." } }
+    }
+}
+
+const ROOM_CSS: &str = r#"
+/* The room is open space, not a boxed widget: no surrounding frame, generous
+   air between turns, an unhurried calm. The cathedral stays backstage. */
+.room-head { margin-bottom: 2rem; }
+.room-head h1 { font-family: var(--serif); font-size: var(--t-3); font-weight: 600; letter-spacing: -.015em; }
+.room {
+  display: flex; flex-direction: column; gap: 1.5rem;
+  min-height: 8rem; padding: .5rem 0 1rem; margin-bottom: 1.5rem;
+}
+.room .b { max-width: 38rem; padding: .9rem 1.15rem; border-radius: 18px; }
+.room .b p { margin: 0; white-space: pre-wrap; line-height: 1.65; }
+.room .b p + p { margin-top: .7rem; }
+.room .b .who { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: .3rem; }
+.room .b.med { background: var(--surface); align-self: flex-start; box-shadow: var(--shadow); }
+.room .b.party { background: var(--accent); color: #fff; align-self: flex-end; }
+.room .b.party .who { color: rgba(255,255,255,.8); }
+.room .b.sys { background: transparent; align-self: center; font-style: italic; color: var(--muted); text-align: center; max-width: 36rem; }
+.room .b.sys.one-moment { color: var(--amber); }
+
+/* The factual-conflict moment: speech, not adjudication. It rides inside a
+   mediator bubble; the two remembered accounts sit quietly side by side. */
+.room .b.med.conflict { max-width: 42rem; }
+.conflict-about { color: var(--text-2); margin: .2rem 0 .6rem; }
+.conflict-claims { display: grid; gap: .5rem; margin: .2rem 0 .8rem; }
+.conflict-claim { background: var(--blue-bg); border-radius: var(--radius-sm); padding: .55rem .8rem; }
+.conflict-claim .who { display: block; font-size: .66rem; text-transform: uppercase; letter-spacing: .06em; color: var(--blue); font-weight: 700; margin-bottom: .2rem; }
+.conflict-claim p { margin: 0; }
+
+.room-form { display: flex; gap: .55rem; align-items: flex-end; margin: 0 0 .9rem; }
+.room-in {
+  flex: 1; resize: vertical; min-height: 2.8rem; font: inherit; line-height: 1.5;
+  padding: .75rem .9rem; border-radius: 14px; border: 1px solid var(--border-2);
+  background: var(--surface); color: var(--text);
+}
+.room-in:focus { outline: none; border-color: var(--accent); }
+.room-say { padding: .75rem 1.3rem; border-radius: 14px; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; transition: background .12s; }
+.room-say:hover { background: var(--accent-2); }
+
+/* The evidence drawer stays a quiet, closed affordance. */
+.evidence-drawer { margin: .2rem 0 1.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.evidence-drawer > summary { cursor: pointer; padding: .85rem 1rem; color: var(--text-2); font-size: var(--t--1); list-style: none; }
+.evidence-drawer > summary::-webkit-details-marker { display: none; }
+.evidence-drawer > summary::before { content: "＋ "; color: var(--accent); }
+.evidence-drawer[open] > summary::before { content: "－ "; }
+.evidence-drawer[open] > summary { border-bottom: 1px solid var(--border); }
+.evidence-form { display: grid; gap: .55rem; padding: 1rem; }
+.evidence-row { display: flex; gap: .5rem; }
+.evidence-kind, .evidence-text, .evidence-note {
+  font: inherit; padding: .55rem .7rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2); background: var(--bg); color: var(--text); width: 100%;
+}
+.evidence-caption { padding: 0 1rem 1rem; font-size: var(--t--1); color: var(--muted); font-style: italic; }
+
+/* The two things the parties themselves shaped — the subtraction and the
+   agreement — are the only things that earn a real surface. Soft, central,
+   roomy; a hairline rather than a hard box. */
+.panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem 1.7rem; margin: .4rem 0; background: var(--surface); box-shadow: var(--shadow); align-self: stretch; }
+.panel-head { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; }
+.panel-kicker { font-size: var(--t--1); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+.panel-note { margin-top: 1.1rem; color: var(--text-2); font-size: var(--t--1); line-height: 1.6; }
+
+/* the signature subtraction panel — quiet, central, beautiful */
+.panel-residue { background: linear-gradient(180deg, var(--surface), var(--bg-2)); border-color: transparent; padding: 1.9rem 1.8rem; }
+.panel-residue .residue-mark { font-family: var(--serif); font-size: var(--t-2); color: var(--accent); line-height: 1; }
+.panel-residue .panel-kicker { color: var(--text-2); }
+.residue-list { list-style: none; display: grid; gap: .8rem; margin-top: .4rem; }
+.residue-list li { font-family: var(--serif); font-size: var(--t-1); line-height: 1.45; color: var(--text); padding-left: 1.2rem; border-left: 2px solid var(--accent); }
+
+/* options: one calm suggestion, the rest one quiet disclosure away */
+.room-options { align-self: stretch; margin: .4rem 0; }
+.room-opt { padding: .2rem 0 .4rem; }
+.room-opt-head { margin-bottom: .35rem; }
+.room-opt-head strong { font-family: var(--serif); font-size: var(--t-1); font-weight: 600; }
+.room-opt-sum { color: var(--text-2); font-size: var(--t-0); line-height: 1.55; }
+.room-accept { margin-top: .9rem; padding: .55rem 1.15rem; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; transition: background .12s, color .12s; }
+.room-accept:hover { background: var(--accent); color: #fff; }
+.more-options { margin-top: 1.1rem; }
+.more-options > summary { cursor: pointer; color: var(--muted); font-size: var(--t--1); list-style: none; }
+.more-options > summary::-webkit-details-marker { display: none; }
+.more-options > summary::before { content: "› "; }
+.more-options[open] > summary::before { content: "⌄ "; }
+.more-options .room-opt { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.options-note { margin-top: 1.2rem; color: var(--text-2); font-size: var(--t--1); line-height: 1.6; }
+
+.panel-draft .draft-form { display: grid; gap: .8rem; }
+.draft-text { font: inherit; line-height: 1.65; padding: 1rem 1.1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-2); background: var(--bg); color: var(--text); resize: vertical; }
+.draft-text:focus { outline: none; border-color: var(--accent); }
+.draft-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+.sign-name.signed { color: var(--green); font-weight: 700; }
+
+.panel-landed { background: var(--green-bg); border-color: transparent; text-align: center; padding: 1.9rem 1.7rem; }
+.panel-landed .panel-head { justify-content: center; }
+.panel-landed .landed-text { font-family: var(--serif); font-size: var(--t-1); line-height: 1.55; color: var(--text); white-space: pre-wrap; }
+
+.session-foot .record-link { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .room .b { max-width: 100%; }
+  .room-form { flex-direction: column; align-items: stretch; }
+}
 "#;
 
 // ───────────────────────────── the audit record ─────────────────────────────
@@ -683,20 +1534,34 @@ fn audit_record_for(
     d: &LoadedDispute,
     key: &ed25519_dalek::SigningKey,
 ) -> mediator_audit::MediationRecord {
-    let events = vec![
-        (
-            "mediation_opened".to_string(),
-            serde_json::json!({
-                "dispute": d.id,
-                "title": d.dispute.title,
-                "parties": d.dispute.parties.iter().map(|p| &p.id).collect::<Vec<_>>(),
-            }),
-        ),
-        (
+    let mut events = vec![(
+        "mediation_opened".to_string(),
+        serde_json::json!({
+            "dispute": d.id,
+            "title": d.dispute.title,
+            "parties": d.dispute.parties.iter().map(|p| &p.id).collect::<Vec<_>>(),
+        }),
+    )];
+    // Record every contested question handed back — the *set* of cruxes (a real
+    // dispute can have several), each explicitly NOT decided by the kernel.
+    if !d.analysis.cruxes.is_empty() {
+        for c in &d.analysis.cruxes {
+            events.push((
+                "crux_handed_back".to_string(),
+                serde_json::json!({
+                    "predicate": c.predicate,
+                    "question": c.question,
+                    "verdict": c.verdict,
+                    "decided_by_kernel": false,
+                }),
+            ));
+        }
+    } else {
+        events.push((
             "crux_handed_back".to_string(),
             serde_json::json!({ "crux": d.analysis.crux, "decided_by_kernel": false }),
-        ),
-    ];
+        ));
+    }
     mediator_audit::build(&d.receipts, &events, key)
 }
 
@@ -802,18 +1667,19 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
     page("Disputes", html! {
         header .hero {
             div .hero-mark { (WORDMARK) }
-            h1 .hero-title { "See the true shape of a disagreement." }
+            h1 .hero-title { "A calm room for a hard conversation." }
             p .hero-lede {
-                "A trusted mediator. It doesn't judge — it clears away the parts "
-                "that were never really the fight, certifies the few facts that "
-                "must not be fudged, and hands back the one question that's "
-                "honestly yours to answer."
+                "Sit down with a patient, impartial mediator that has no stake in how "
+                "this lands. It hears you out, reflects back what matters, clears away "
+                "what was never really the fight, and hands the one honest question "
+                "back to you. Nothing is decided for you."
             }
             @if let Some(first) = state.disputes.first() {
+                @let first_party = first.dispute.parties.first().map(|p| p.id.clone()).unwrap_or_default();
                 div .hero-cta {
-                    style { (PreEscaped(".hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.3rem}.hero-cta a{padding:.62rem 1.05rem;border-radius:12px;text-decoration:none;font-weight:500}.cta-primary{background:#c06a3e;color:#fff}.cta-primary:hover{background:#a85a32}.cta-secondary{border:1px solid #d8cbb6;color:inherit}.cta-secondary:hover{background:#fbf6ee}")) }
-                    a .cta-primary href=(format!("/session/{}", first.id)) { "▶ Watch a mediation" }
-                    a .cta-secondary href=(format!("/dispute/{}", first.id)) { "Talk to the mediator yourself →" }
+                    style { (PreEscaped(".hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;justify-content:center;margin-top:1.4rem}.hero-cta a{padding:.66rem 1.15rem;border-radius:12px;text-decoration:none;font-weight:600}.cta-primary{background:var(--accent);color:#fff}.cta-primary:hover{background:var(--accent-2)}.cta-secondary{border:1px solid var(--border-2);color:inherit}.cta-secondary:hover{background:var(--bg-2)}")) }
+                    a .cta-primary href=(format!("/talk/{}/{}", first.id, first_party)) { "Enter the room →" }
+                    a .cta-secondary href=(format!("/session/{}", first.id)) { "Or watch a full mediation" }
                 }
             }
         }
@@ -842,8 +1708,11 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
                         h2 .case-title { (&d.dispute.title) }
                         p .case-blurb { (&d.blurb) }
                         div .case-foot {
-                            @if d.analysis.crux.is_some() {
+                            @let n = crux_count(&d.analysis);
+                            @if n == 1 {
                                 span .chip .chip-amber { "1 open question" }
+                            } @else if n > 1 {
+                                span .chip .chip-amber { (n) " open questions" }
                             }
                             @if !d.analysis.dissolved.is_empty() {
                                 span .chip .chip-green { "a misunderstanding cleared" }
@@ -858,6 +1727,18 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
             }
         }
     })
+}
+
+/// How many contested questions a dispute reduces to: the multi-crux set if
+/// present, else 1 if a single crux is on record, else 0.
+fn crux_count(a: &Analysis) -> usize {
+    if !a.cruxes.is_empty() {
+        a.cruxes.len()
+    } else if a.crux.is_some() {
+        1
+    } else {
+        0
+    }
 }
 
 /// "Robin (moving out)" → "Robin"; keeps a clean party chip.
@@ -926,12 +1807,12 @@ async fn seat_picker(
         }
 
         section .talk-invite {
-            style { (PreEscaped(".talk-invite{margin-top:1.5rem}.talk-links{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.55rem}.talk-link{padding:.55rem .95rem;border:1px solid #d8cbb6;border-radius:10px;text-decoration:none;color:inherit}.talk-link:hover{background:#fbf6ee}")) }
-            p { "Or try it yourself — speak privately with the mediator, live:" }
+            style { (PreEscaped(".talk-invite{margin-top:1.6rem}.talk-invite>p{color:var(--text-2)}.talk-links{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.65rem}.talk-link{padding:.7rem 1.1rem;border:1.5px solid var(--accent);border-radius:12px;text-decoration:none;color:var(--accent);font-weight:600}.talk-link:hover{background:var(--accent);color:#fff}")) }
+            p { strong { "Or step into the room yourself." } " Sit with the mediator, live — be heard, in your own words, with no clock and no judgement:" }
             div .talk-links {
                 @for p in &d.dispute.parties {
                     a .talk-link href=(format!("/talk/{}/{}", d.id, p.id)) {
-                        "Talk as " (party_first_name(&p.display_name))
+                        "Enter as " (party_first_name(&p.display_name)) " →"
                     }
                 }
             }
@@ -1023,21 +1904,37 @@ async fn party_view(
             }
         }
 
-        // (3) The one open question — the crux, phrased kindly.
-        @if let Some(crux) = &a.crux {
+        // (3) The open question(s) — the crux(es), phrased kindly. A real dispute
+        //     can reduce to several; we show each, handed back, never decided.
+        @let crux_qs = crux_questions(&Session::new(d.dispute.clone(), d.analysis.clone(), Vec::new()));
+        @if !crux_qs.is_empty() {
             section .reveal .step {
                 span .step-n { "3" }
-                h2 { "The one question that's really yours" }
-                p .step-lede {
-                    "Everything else has been settled or set aside. This is the "
-                    "single thing left — and it's not ours to decide. It's a "
-                    "judgement only the two of you can make."
+                @if crux_qs.len() == 1 {
+                    h2 { "The one question that's really yours" }
+                    p .step-lede {
+                        "Everything else has been settled or set aside. This is the "
+                        "single thing left — and it's not ours to decide. It's a "
+                        "judgement only the two of you can make."
+                    }
+                } @else {
+                    h2 { "The questions that are really yours" }
+                    p .step-lede {
+                        "Everything else has been settled or set aside. These are the "
+                        "genuine knots that remain — and they're not ours to decide. "
+                        "They're judgements only the two of you can make."
+                    }
                 }
-                div .crux-box {
-                    p .crux-q { (crux_question(d, crux)) }
-                    p .crux-note {
-                        "We've confirmed this is the genuine crux: answer it, and "
-                        "the numbers below follow on their own."
+                @for q in &crux_qs {
+                    div .crux-box {
+                        p .crux-q { (q) }
+                    }
+                }
+                p .crux-note {
+                    @if crux_qs.len() == 1 {
+                        "We've confirmed this is the genuine crux: answer it, and the numbers below follow on their own."
+                    } @else {
+                        "Each of these was confirmed to be a genuine crux: settle them between you, and the numbers below follow on their own."
                     }
                 }
             }
@@ -1144,12 +2041,15 @@ fn reveal_script() -> Markup {
 ///   1. the crux predicate's signature gloss → "Is it true that {gloss}?"
 ///   2. a "Whether …" genuine-conflict description, if present
 ///   3. the kernel's crux sentence (last resort)
-fn crux_question(d: &LoadedDispute, kernel_crux: &str) -> String {
-    if let Some(gloss) = crux_gloss(&d.dispute) {
+///
+/// Decoupled from `LoadedDispute` so both the party view and the room (which
+/// holds a `Session`) can reuse it.
+fn crux_question_from(dispute: &Dispute, analysis: &Analysis, kernel_crux: &str) -> String {
+    if let Some(gloss) = crux_gloss(dispute) {
         let g = gloss.trim().trim_end_matches('.');
         return format!("Is it true that {g}?");
     }
-    if let Some(c) = d.analysis.genuine_conflicts.first() {
+    if let Some(c) = analysis.genuine_conflicts.first() {
         let desc = c.description.trim();
         if let Some(rest) = desc.strip_prefix("Whether ") {
             let core = rest.split(" — ").next().unwrap_or(rest).trim();
@@ -1160,6 +2060,35 @@ fn crux_question(d: &LoadedDispute, kernel_crux: &str) -> String {
         }
     }
     kernel_crux.to_string()
+}
+
+/// Phrase one specific [`Crux`] (multi-crux case) as a kind question. Prefers the
+/// crux predicate's own signature gloss; falls back to the crux's stored
+/// `question`, then its predicate symbol prettified.
+fn crux_view_question(dispute: &Dispute, crux: &Crux) -> String {
+    if let Some(gloss) = predicate_gloss(dispute, &crux.predicate) {
+        let g = gloss.trim().trim_end_matches('.');
+        return format!("Is it true that {g}?");
+    }
+    let q = crux.question.trim();
+    if !q.is_empty() {
+        if let Some(rest) = q.strip_prefix("Whether ") {
+            let core = rest.split(" — ").next().unwrap_or(rest).trim();
+            return format!("Is it true that {core}?");
+        }
+        return q.split(" — ").next().unwrap_or(q).trim().to_string();
+    }
+    format!("Is it true that {}?", prettify_id(&crux.predicate))
+}
+
+/// The human gloss for a named predicate symbol, from any party's signature.
+fn predicate_gloss(dispute: &Dispute, predicate: &str) -> Option<String> {
+    dispute
+        .parties
+        .iter()
+        .flat_map(|p| &p.signature)
+        .find(|s| s.name == predicate && !s.gloss.trim().is_empty())
+        .map(|s| s.gloss.clone())
 }
 
 /// Find the gloss of the crux predicate. The crux is the right-hand atom of a
@@ -1706,6 +2635,8 @@ struct FormalizeForm {
 
 /// `POST /formalize/:dispute_id` — returns an htmx HTML fragment.
 async fn formalize_claim(
+    headers: HeaderMap,
+    conn: Option<ConnectInfo<SocketAddr>>,
     Path(dispute_id): Path<String>,
     State(state): State<SharedState>,
     Form(form): Form<FormalizeForm>,
@@ -1745,8 +2676,9 @@ async fn formalize_claim(
         return (StatusCode::OK, frag).into_response();
     }
 
-    // Rate limiter.
-    if !state.rate_limiter.allow() {
+    // Per-IP + global rate limiter (this is a live model call).
+    let ip = client_ip(&headers, conn.map(|c| c.0));
+    if !state.rate_limiter.allow(&ip) {
         let frag = html! {
             p .formalize-hint {
                 "One moment — the council is still thinking. Try again in a few seconds."

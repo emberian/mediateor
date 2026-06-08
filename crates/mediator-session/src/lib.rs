@@ -120,6 +120,68 @@ impl Evidence {
     }
 }
 
+/// Two pieces of evidence that **collide on a fact** — each party putting a
+/// different concrete value on the record for the same thing. The kernel's most
+/// honest move: surface that this is a *factual* conflict that "needs evidence,
+/// not logic", name exactly which claimed fact is contested — and *refuse to
+/// decide it*. The machine never rules; it only points. Detection is structural
+/// and deliberately simple; the honesty (handing it back) is the point.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FactualConflict {
+    /// The two parties whose facts collide.
+    pub between: (PartyId, PartyId),
+    /// The colliding claimed-fact texts, in `between` order.
+    pub claims: (String, String),
+    /// A plain-English naming of what's contested (what the two facts disagree
+    /// about), e.g. "how big the stain is". Never an adjudication.
+    pub about: String,
+}
+
+/// A draft agreement the **parties co-author** toward mutual sign-off. The text
+/// is theirs — specific, mutual, in their own words — not an accept/reject of an
+/// AI's option. The receipt later certifies only that the agreement is internally
+/// coherent (consistent with the certified facts), **never** that it's "right".
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DraftAgreement {
+    /// The current agreement text the parties are shaping. Edited toward sign-off.
+    pub text: String,
+    /// Who has signed off on the *current* text. Any edit clears this (a changed
+    /// agreement must be re-owned by both), so a signature always attaches to the
+    /// exact words in front of them.
+    pub signed_by: Vec<PartyId>,
+    /// The provenance of each edit — who shaped this toward its current form, so
+    /// the ownership is legible. `(party_or_mediator, what_changed)`.
+    pub revisions: Vec<(String, String)>,
+}
+
+impl DraftAgreement {
+    pub fn new(text: impl Into<String>, by: &str) -> Self {
+        let text = text.into();
+        Self {
+            revisions: vec![(by.to_string(), "opened the draft".to_string())],
+            text,
+            signed_by: Vec::new(),
+        }
+    }
+    /// Replace the agreement text. **Clears all signatures** — a changed
+    /// agreement is no longer the one anyone signed; it must be re-owned by both.
+    pub fn revise(&mut self, by: &str, text: impl Into<String>) {
+        self.text = text.into();
+        self.signed_by.clear();
+        self.revisions.push((by.to_string(), "revised the wording".to_string()));
+    }
+    /// A party signs off on the *current* text. Idempotent per party.
+    pub fn sign(&mut self, party: &str) {
+        if !self.signed_by.iter().any(|p| p == party) {
+            self.signed_by.push(party.to_string());
+        }
+    }
+    /// True once every listed party has signed the current text.
+    pub fn fully_signed(&self, parties: &[PartyId]) -> bool {
+        !parties.is_empty() && parties.iter().all(|p| self.signed_by.contains(p))
+    }
+}
+
 /// One party's private thread + what the mediator has learned from them.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartyThread {
@@ -133,6 +195,25 @@ pub struct PartyThread {
     /// acknowledged — but never load-bearing on the crux.
     #[serde(default)]
     pub evidence: Vec<Evidence>,
+    /// **Readiness, not structure.** True once the mediator judges this party has
+    /// been heard *fully* — they've had their uninterrupted space and aren't still
+    /// venting. The flow gives more caucus space until this is set, instead of
+    /// racing to the joint work. Set by the brain (`CaucusMove::heard_fully`).
+    #[serde(default)]
+    pub heard_fully: bool,
+    /// An interest the mediator has *named* under the position but not yet checked
+    /// back / had confirmed. Position→interest is a gentle loop, not one beat: the
+    /// mediator reflects this, the party confirms (or corrects), and only then does
+    /// it become a `confirmed_interest`.
+    #[serde(default)]
+    pub pending_interest: Option<String>,
+    /// The interest the party themselves **confirmed** is the real thing under the
+    /// position ("yes — it's that you stopped showing up"). The core human work:
+    /// only this counts as the surfaced interest, because the party owns it.
+    #[serde(default)]
+    pub interest_confirmed: bool,
+    #[serde(default)]
+    pub confirmed_interest: Option<String>,
 }
 
 /// A settlement option on the table.
@@ -174,6 +255,30 @@ pub struct Session {
     /// independent of `phase`, which the batch driver marches through).
     #[serde(default)]
     pub crux_named: bool,
+    /// Factual conflicts detected across the evidence on record — two parties'
+    /// claimed facts colliding on the same thing. Surfaced (named, handed back),
+    /// never decided. Recomputed structurally as evidence arrives.
+    #[serde(default)]
+    pub factual_conflicts: Vec<FactualConflict>,
+    /// Whether the mediator has surfaced the current factual conflicts on the
+    /// record. Cleared whenever the set of conflicts changes (new collision ⇒
+    /// the flow revisits and surfaces it).
+    #[serde(default)]
+    pub conflicts_surfaced: bool,
+    /// **Subtraction made visible.** Once the formalizable ledger is settled and
+    /// certified, the *residue* is what was never about the money — the part the
+    /// kernel cannot touch and shouldn't pretend to. Named explicitly so a
+    /// frightened person can see the philosophy: the money is handled and
+    /// certified fair; this is what's left, and it's human.
+    #[serde(default)]
+    pub residue: Vec<String>,
+    /// Whether the mediator has named the residue on the record yet.
+    #[serde(default)]
+    pub residue_named: bool,
+    /// The agreement the parties are **co-authoring** toward mutual sign-off — in
+    /// their own words, owned by both. `None` until convergence opens it.
+    #[serde(default)]
+    pub draft_agreement: Option<DraftAgreement>,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +323,10 @@ impl Session {
                 caucus: Vec::new(),
                 interests: Vec::new(),
                 evidence: Vec::new(),
+                heard_fully: false,
+                pending_interest: None,
+                interest_confirmed: false,
+                confirmed_interest: None,
             })
             .collect();
         let id = slug(&dispute.title);
@@ -234,6 +343,11 @@ impl Session {
             events: Vec::new(),
             evidence_acknowledged: false,
             crux_named: false,
+            factual_conflicts: Vec::new(),
+            conflicts_surfaced: false,
+            residue: Vec::new(),
+            residue_named: false,
+            draft_agreement: None,
         }
     }
 
@@ -276,7 +390,49 @@ impl Session {
         th.evidence.push(ev);
         self.evidence_acknowledged = false;
         self.events.push(format!("evidence:{by}:{render}"));
+        self.recompute_factual_conflicts();
         Ok(())
+    }
+
+    /// Re-derive the set of [`FactualConflict`]s from the `Fact` evidence on
+    /// record. **Structural and deliberately simple**: two parties' stated facts
+    /// collide when they're *about the same thing* (share a salient noun) yet
+    /// carry *different concrete values* (different numbers/measurements). The
+    /// honesty is in handing it back, not in cleverness — a real human mediator
+    /// just notices "you two are saying different numbers about the same thing."
+    ///
+    /// If the conflict set changes, `conflicts_surfaced` is reset so the flow
+    /// revisits and names the new collision. Never decides who's right.
+    pub fn recompute_factual_conflicts(&mut self) {
+        let facts: Vec<&Evidence> = self
+            .all_evidence()
+            .into_iter()
+            .filter(|e| e.kind == EvidenceKind::Fact)
+            .collect();
+        let mut found: Vec<FactualConflict> = Vec::new();
+        for i in 0..facts.len() {
+            for j in (i + 1)..facts.len() {
+                let (a, b) = (facts[i], facts[j]);
+                if a.by == b.by {
+                    continue; // a party doesn't contradict themselves here
+                }
+                if let Some(about) = facts_collide(&a.text, &b.text) {
+                    found.push(FactualConflict {
+                        between: (a.by.clone(), b.by.clone()),
+                        claims: (a.text.clone(), b.text.clone()),
+                        about,
+                    });
+                }
+            }
+        }
+        if found != self.factual_conflicts {
+            self.factual_conflicts = found;
+            self.conflicts_surfaced = false;
+        }
+    }
+
+    pub fn has_factual_conflict(&self) -> bool {
+        !self.factual_conflicts.is_empty()
     }
 
     /// All evidence across every party thread, in submission order per party.
@@ -338,6 +494,132 @@ impl Session {
     pub fn someone_accepted(&self) -> bool {
         self.proposals.iter().any(|p| !p.accepted_by.is_empty())
     }
+
+    // ── readiness (read the room, don't count states) ──
+
+    /// A party who has spoken but whom the mediator hasn't judged *heard fully*
+    /// yet — still venting, still needing uninterrupted space. The flow gives
+    /// them more room before any joint move. `None` once everyone is heard fully.
+    pub fn needs_more_space(&self) -> Option<PartyId> {
+        self.parties
+            .iter()
+            .find(|t| !t.caucus.is_empty() && !t.heard_fully)
+            .map(|t| t.id.clone())
+    }
+
+    /// True once every party has both spoken *and* been heard fully — the real
+    /// readiness gate for moving into joint work (not a state counter).
+    pub fn everyone_heard_fully(&self) -> bool {
+        !self.parties.is_empty() && self.parties.iter().all(|t| t.heard_fully)
+    }
+
+    /// A party with an interest the mediator *named* but hasn't had *confirmed*
+    /// yet — the check-back is owed. Position→interest is a loop: name it, check
+    /// it back, let them confirm. `None` when no check-back is pending.
+    pub fn needs_interest_check_back(&self) -> Option<PartyId> {
+        self.parties
+            .iter()
+            .find(|t| t.pending_interest.is_some() && !t.interest_confirmed)
+            .map(|t| t.id.clone())
+    }
+
+    /// Record that the mediator has *named* a candidate interest for a party and
+    /// owes them a check-back. Does not yet confirm it (the party must).
+    pub fn name_interest(&mut self, party: &str, interest: impl Into<String>) {
+        if let Some(th) = self.parties.iter_mut().find(|t| t.id == party) {
+            th.pending_interest = Some(interest.into());
+            th.interest_confirmed = false;
+        }
+    }
+
+    /// The party **confirms** the named interest is right (they own it). Promotes
+    /// the pending interest to the confirmed one, and folds it into `interests`.
+    /// If `corrected` is given, that becomes the confirmed interest instead — the
+    /// party's words win ("no — it's actually that…").
+    pub fn confirm_interest(&mut self, party: &str, corrected: Option<String>) {
+        if let Some(th) = self.parties.iter_mut().find(|t| t.id == party) {
+            let interest = corrected.or_else(|| th.pending_interest.take());
+            if let Some(i) = interest {
+                if !th.interests.contains(&i) {
+                    th.interests.push(i.clone());
+                }
+                th.confirmed_interest = Some(i);
+                th.interest_confirmed = true;
+                th.pending_interest = None;
+            }
+        }
+        self.events.push(format!("interest_confirmed:{party}"));
+    }
+
+    /// Mark a party as heard fully (the mediator judged they've had their space).
+    pub fn mark_heard_fully(&mut self, party: &str) {
+        if let Some(th) = self.parties.iter_mut().find(|t| t.id == party) {
+            th.heard_fully = true;
+        }
+    }
+
+    // ── subtraction made visible / co-authored agreement ──
+
+    /// Whether the formalizable ledger is settled and certified — the gate for
+    /// naming the residue. (A refund is certified ⇒ the money question is handled.)
+    pub fn ledger_settled(&self) -> bool {
+        self.analysis.ledger_refund_cents.is_some()
+    }
+
+    /// Whether there is residue to name — the non-formalizable part left once the
+    /// money is handled. Drawn from confirmed interests + any unresolved factual
+    /// conflict, falling back to a single honest line. Computed, not invented.
+    pub fn residue_candidates(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for th in &self.parties {
+            if let Some(i) = &th.confirmed_interest {
+                out.push(format!("for {}: {}", first_name(&th.display_name), i));
+            }
+        }
+        if out.is_empty() {
+            out.push(
+                "the part of this that was never really about the money — the trust, \
+                 the feeling of being seen — which no ledger can settle"
+                    .to_string(),
+            );
+        }
+        out
+    }
+
+    /// Open a co-authored draft agreement (idempotent: keeps an existing draft).
+    pub fn open_draft_agreement(&mut self, initial: impl Into<String>, by: &str) {
+        if self.draft_agreement.is_none() {
+            self.draft_agreement = Some(DraftAgreement::new(initial, by));
+            self.events.push("draft_opened".into());
+        }
+    }
+
+    /// A party (or the mediator) revises the draft toward their own words. Clears
+    /// signatures — a changed agreement must be re-owned by both.
+    pub fn revise_draft(&mut self, by: &str, text: impl Into<String>) {
+        if let Some(d) = self.draft_agreement.as_mut() {
+            d.revise(by, text);
+            self.events.push(format!("draft_revised:{by}"));
+        }
+    }
+
+    /// A party signs the current draft text.
+    pub fn sign_draft(&mut self, party: &str) {
+        if let Some(d) = self.draft_agreement.as_mut() {
+            d.sign(party);
+            self.events.push(format!("draft_signed:{party}"));
+        }
+    }
+
+    /// True once the draft agreement exists and every party has signed its
+    /// current text — the agreement is theirs, mutual, and owned.
+    pub fn agreement_owned(&self) -> bool {
+        let ids = self.party_ids();
+        self.draft_agreement
+            .as_ref()
+            .map(|d| d.fully_signed(&ids))
+            .unwrap_or(false)
+    }
 }
 
 // ────────────────────────── the mediator's voice ─────────────────────────
@@ -353,6 +635,30 @@ pub struct CaucusMove {
     pub claims: Vec<ClaimDraft>,
     /// The mediator feels this caucus has what it needs.
     pub done: bool,
+    /// **Readiness, read from the room.** The mediator judges this party has now
+    /// been heard *fully* — they've had their space and aren't still venting. When
+    /// false, the flow gives more uninterrupted caucus space instead of rushing on.
+    #[serde(default)]
+    pub heard_fully: bool,
+    /// A candidate interest the mediator hears under the position, to be *checked
+    /// back* (not yet confirmed). Drives the [`MediatorAction::CheckBackInterest`]
+    /// loop: named here, confirmed by the party, only then surfaced.
+    #[serde(default)]
+    pub interest_to_check: Option<String>,
+}
+
+impl CaucusMove {
+    /// A bare reply with no special signals (heard-fully not yet judged).
+    pub fn reply_only(reply: impl Into<String>) -> Self {
+        Self {
+            reply: reply.into(),
+            interests: Vec::new(),
+            claims: Vec::new(),
+            done: false,
+            heard_fully: false,
+            interest_to_check: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -387,6 +693,36 @@ pub trait MediatorBrain {
     /// never let it decide the crux.
     fn acknowledge_evidence(&self, s: &Session) -> String {
         acknowledge_evidence(s)
+    }
+
+    /// **Check an interest back** to the party (the iterated heart of the work):
+    /// "it sounds like what matters isn't the $400, it's that you stopped showing
+    /// up — am I close?" Defaults to the pure [`check_back_interest`] helper. The
+    /// driver only advances once the party confirms or corrects it.
+    fn check_back_interest(&self, s: &Session, party: &PartyId) -> String {
+        check_back_interest(s, party)
+    }
+
+    /// **Surface a factual conflict** — two parties' claimed facts colliding on
+    /// the same thing — as something that "needs evidence, not logic", naming
+    /// exactly what's contested and refusing to decide it. Defaults to the pure
+    /// [`surface_factual_conflict`] helper.
+    fn surface_factual_conflict(&self, s: &Session) -> String {
+        surface_factual_conflict(s)
+    }
+
+    /// **Name the residue** — subtraction made visible. With the money handled and
+    /// certified fair, name the part that was never about the money. Defaults to
+    /// the pure [`name_residue`] helper.
+    fn name_residue(&self, s: &Session) -> String {
+        name_residue(s)
+    }
+
+    /// Help the parties **co-author** their agreement in their own words. Returns
+    /// an opening draft text (a scaffold the parties then edit toward sign-off) —
+    /// never the AI's verdict. Defaults to the pure [`co_author_agreement`] helper.
+    fn co_author_agreement(&self, s: &Session) -> String {
+        co_author_agreement(s)
     }
 }
 
@@ -431,6 +767,24 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
                         th.interests.push(i);
                     }
                 }
+                // READINESS: the brain reads the room. A party heard fully moves
+                // on; otherwise the flow would give more space (in the interactive
+                // driver). The batch spine takes the brain's judgement as given.
+                if mv.heard_fully {
+                    th.heard_fully = true;
+                }
+            }
+            // INTEREST CHECK-BACK LOOP: a named-but-unconfirmed interest gets
+            // checked back, and the party confirms it (the batch spine confirms on
+            // their behalf; the interactive driver waits for the real reply).
+            if let Some(interest) = mv.interest_to_check {
+                s.name_interest(&pid, &interest);
+                let cb = brain.check_back_interest(&s, &pid);
+                if let Some(th) = s.parties.iter_mut().find(|t| t.id == pid) {
+                    th.caucus.push(Utterance::mediator(cb));
+                    th.caucus.push(Utterance::party(&pid, "Yes — that's it, exactly."));
+                }
+                s.confirm_interest(&pid, None);
             }
         }
     }
@@ -442,6 +796,15 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
         s.joint_transcript.push(Utterance::mediator(ack));
         s.evidence_acknowledged = true;
         s.events.push("acknowledge_evidence".into());
+    }
+
+    // ── Surface any factual conflict the evidence created (handed back, never
+    //    decided). Recomputed when evidence arrived via `submit_evidence`. ──
+    if s.has_factual_conflict() && !s.conflicts_surfaced {
+        let msg = brain.surface_factual_conflict(&s);
+        s.joint_transcript.push(Utterance::mediator(msg));
+        s.conflicts_surfaced = true;
+        s.events.push("factual_conflict".into());
     }
 
     // ── Shared Ground (certified) ──
@@ -456,6 +819,18 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
     s.joint_transcript.push(Utterance::mediator(cx));
     s.crux_named = true;
     s.events.push("crux".into());
+
+    // ── Subtraction made visible: once the money is settled & certified, name the
+    //    residue — the part that was never about the money. The signature move. ──
+    if s.ledger_settled() && !s.residue_named {
+        if s.residue.is_empty() {
+            s.residue = s.residue_candidates();
+        }
+        let r = brain.name_residue(&s);
+        s.joint_transcript.push(Utterance::mediator(r));
+        s.residue_named = true;
+        s.events.push("residue".into());
+    }
 
     // ── Proposals (only certified-coherent ones reach the parties) ──
     s.phase = Phase::Proposals;
@@ -478,8 +853,19 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
     s.phase = Phase::Convergence;
     let everyone = s.party_ids();
     if let Some(p) = s.proposals.iter_mut().find(|p| p.coherent) {
-        p.accepted_by = everyone;
+        p.accepted_by = everyone.clone();
         s.events.push(format!("accepted:{}", p.id));
+    }
+
+    // ── Co-authored, OWNED agreement. Convergence isn't accept/reject of an AI
+    //    option: the parties shape the final text in their own words and sign off.
+    //    The batch spine opens the draft and has both sign; the interactive driver
+    //    mediates the real editing rounds. ──
+    let draft_text = brain.co_author_agreement(&s);
+    s.open_draft_agreement(draft_text.clone(), "mediator");
+    s.joint_transcript.push(Utterance::mediator(draft_text));
+    for pid in &everyone {
+        s.sign_draft(pid);
     }
 
     // ── Agreement ──
@@ -509,19 +895,35 @@ pub fn conduct(mut s: Session, brain: &dyn MediatorBrain, inputs: &ScriptedInput
 pub enum MediatorAction {
     /// Open the session (nothing said yet).
     Welcome,
-    /// Caucus privately with this party (chosen because they've not been heard).
+    /// Caucus privately with this party (chosen because they've not been heard,
+    /// or haven't yet been heard *fully* — still venting / needing space).
     AskParty(PartyId),
+    /// Check an interest *back* to the party: name what seems to matter under the
+    /// position and ask if it's close — the iterated heart of the human work. Only
+    /// advances once the party confirms (or corrects) it.
+    CheckBackInterest(PartyId),
     /// Weigh and acknowledge evidence that's been submitted but not yet folded
     /// in (informs the humans; never decides the crux).
     AcknowledgeEvidence,
+    /// Two parties' claimed facts collide on the same thing. Surface it as a
+    /// *factual* conflict that "needs evidence, not logic", name exactly what's
+    /// contested — and hand it back. The machine never rules on which fact is true.
+    SurfaceFactualConflict,
     /// Reflect the certified common ground back to both.
     ReflectSharedGround,
     /// Name the genuine knot and hand it back (never decide it).
     NameCrux,
+    /// **Subtraction made visible.** With the money handled and certified fair,
+    /// name the residue — the part that was never about the money. The signature
+    /// move, made legible.
+    NameResidue,
     /// Put certified-coherent settlement options on the table.
     ProposeOptions,
     /// Invite the parties to accept / counter / hold.
     InviteAgreement,
+    /// Help the parties **co-author** the final agreement in their own words and
+    /// edit it toward mutual sign-off — the agreement is theirs, not the AI's.
+    CoAuthorAgreement,
     /// Hand off to a human with the full record (the always-available backstop).
     Escalate,
     /// Nothing left to do — the session has landed (or been escalated).
@@ -559,11 +961,34 @@ pub fn next_action(s: &Session) -> MediatorAction {
         return MediatorAction::AskParty(p);
     }
 
+    // 1b. READ THE ROOM, don't count states. A party who has spoken but isn't yet
+    //     *heard fully* — still venting, still needing uninterrupted space — gets
+    //     more room before any joint move. The pacing is the mediator's skill; we
+    //     don't race to the crux while someone is still being heard.
+    if let Some(p) = s.needs_more_space() {
+        return MediatorAction::AskParty(p);
+    }
+
+    // 1c. INTEREST ELICITATION is a check-back LOOP, not one beat. If the mediator
+    //     has named a candidate interest under the position but the party hasn't
+    //     confirmed it yet, the check-back is owed before we move on. The interest
+    //     isn't surfaced until the party *owns* it.
+    if let Some(p) = s.needs_interest_check_back() {
+        return MediatorAction::CheckBackInterest(p);
+    }
+
     // 2. Weigh any evidence that's come in but hasn't been acknowledged on the
     //    record yet. Submitting a late exhibit re-opens this (revisit), because
     //    `submit_evidence` clears `evidence_acknowledged`.
     if s.has_evidence() && !s.evidence_acknowledged {
         return MediatorAction::AcknowledgeEvidence;
+    }
+
+    // 2b. EVIDENCE COLLIDED. When two parties' claimed facts conflict on the same
+    //     thing, surface it as a *factual* conflict that needs evidence not logic —
+    //     name what's contested, hand it back, never rule. New collision ⇒ revisit.
+    if s.has_factual_conflict() && !s.conflicts_surfaced {
+        return MediatorAction::SurfaceFactualConflict;
     }
 
     // 3. With everyone heard and evidence weighed, reflect shared ground (once).
@@ -584,9 +1009,23 @@ pub fn next_action(s: &Session) -> MediatorAction {
         return MediatorAction::ProposeOptions;
     }
 
-    // 6. Invite agreement until someone accepts.
+    // 5b. SUBTRACTION MADE VISIBLE. Once the money is handled and certified fair,
+    //     name the residue — the part that was never about the money — before
+    //     pressing toward sign-off. The signature move, made legible.
+    if s.ledger_settled() && !s.residue_named {
+        return MediatorAction::NameResidue;
+    }
+
+    // 6. Invite agreement until someone signals convergence.
     if !s.someone_accepted() {
         return MediatorAction::InviteAgreement;
+    }
+
+    // 6b. CO-AUTHORED, OWNED AGREEMENT. Convergence isn't accept/reject of an AI
+    //     option: the parties shape the final text in their own words and sign off
+    //     on it. Keep helping co-author until the agreement is mutually owned.
+    if !s.agreement_owned() {
+        return MediatorAction::CoAuthorAgreement;
     }
 
     // 7. Landed.
@@ -627,6 +1066,196 @@ pub fn acknowledge_evidence(s: &Session) -> String {
          decide.",
     );
     out.trim_end().to_string()
+}
+
+/// Check an interest **back** to a party (the iterated heart of the human work):
+/// name what seems to matter under the position and ask if it's close, so the
+/// party can confirm or correct. **Pure** (offline floor). The driver only
+/// advances once the party owns it via [`Session::confirm_interest`].
+pub fn check_back_interest(s: &Session, party: &PartyId) -> String {
+    let th = s.parties.iter().find(|t| &t.id == party);
+    let name = th.map(|t| first_name(&t.display_name)).unwrap_or_default();
+    match th.and_then(|t| t.pending_interest.clone()) {
+        Some(interest) => format!(
+            "{name}, I want to check something back with you before we go on. It \
+             sounds like, underneath the specifics, what really matters to you here \
+             isn't only the practical part — it's {interest}. Am I close? If I've got \
+             it wrong, tell me how you'd put it — your words are the ones that count.",
+        ),
+        None => format!(
+            "{name}, can you help me name what matters most to you underneath all \
+             this? I'd rather hear it in your words than guess at it."
+        ),
+    }
+}
+
+/// Surface a **factual conflict**: two parties' claimed facts colliding on the
+/// same thing. **Pure** (offline floor). It names exactly what's contested and is
+/// explicit that this is the one kind of thing that *needs evidence, not logic* —
+/// and that the machine will not decide it. Honesty is the whole move.
+pub fn surface_factual_conflict(s: &Session) -> String {
+    if s.factual_conflicts.is_empty() {
+        return "Your accounts line up on the facts — there's nothing here where \
+                you're claiming two different things about the same thing."
+            .to_string();
+    }
+    let mut out = String::from(
+        "There's a place where what each of you has put on the record doesn't \
+         line up — and I want to be honest about what that is, because it's a \
+         particular kind of thing:\n",
+    );
+    for c in &s.factual_conflicts {
+        let a = first_name(&s.party_name(&c.between.0));
+        let b = first_name(&s.party_name(&c.between.1));
+        out.push_str(&format!(
+            "  • You disagree about {about}: {a} says \"{ca}\", {b} says \"{cb}\".\n",
+            about = c.about,
+            ca = c.claims.0,
+            cb = c.claims.1,
+        ));
+    }
+    out.push_str(
+        "\nThat's not something logic or I can settle — it's a question of fact, \
+         and a question of fact needs evidence, not argument. I'm not going to \
+         decide which of you is right about it; that wouldn't be fair or honest. \
+         What we *can* do is be clear that this is the thing the evidence has to \
+         speak to, and keep working everything that doesn't hang on it.",
+    );
+    out.trim_end().to_string()
+}
+
+/// Name the **residue** — subtraction made visible. **Pure** (offline floor).
+/// With the money handled and certified fair, this names the part that was never
+/// about the money, so a frightened person can see the philosophy: the ledger is
+/// settled; what's left is human, and it's theirs.
+pub fn name_residue(s: &Session) -> String {
+    let residue = if s.residue.is_empty() {
+        s.residue_candidates()
+    } else {
+        s.residue.clone()
+    };
+    let mut out = String::from(
+        "I want to draw a line under something, because it matters. The money part \
+         of this is handled — it was checked, and the split is fair; that's settled \
+         and it can't be fudged. So here's the honest thing: what's left isn't the \
+         money. What's left is the part that was never really about it —\n",
+    );
+    for r in &residue {
+        out.push_str(&format!("  • {r}\n"));
+    }
+    out.push_str(
+        "\nI can't certify that part, and I won't pretend a number ever could. But \
+         naming it is worth something — it's the real thing, and it's yours to do \
+         with what you choose.",
+    );
+    out.trim_end().to_string()
+}
+
+/// Open a **co-authored** agreement: a scaffold in plain, mutual language the
+/// parties then edit toward sign-off. **Pure** (offline floor). The text is a
+/// starting point for *them* to make theirs — never the AI's verdict, and the
+/// receipt later certifies only internal coherence, never that it's "right".
+pub fn co_author_agreement(s: &Session) -> String {
+    let names: Vec<String> = s.parties.iter().map(|t| first_name(&t.display_name)).collect();
+    let who = join_names(&names);
+    let mut out = format!(
+        "Let's write this down together, in your words — not mine. Here's a plain \
+         starting point for {who} to shape until it's something you both actually \
+         mean:\n\n",
+    );
+    out.push_str("  \"We, ");
+    out.push_str(&who);
+    out.push_str(
+        ", agree to settle this between us. We've handled the money in the way we \
+         worked out, and we each understand what mattered to the other underneath \
+         it.",
+    );
+    if let Some(c) = s.analysis.crux.as_ref() {
+        out.push_str(&format!(
+            " On the one open question — {c} — we've decided together how to leave \
+             it, and that decision is ours.",
+        ));
+    }
+    out.push_str(
+        " We're signing this because it's fair enough to live with, not because \
+         anyone made us.\"\n\n",
+    );
+    out.push_str(
+        "Change any word of it. When it says what you both mean, you each sign it — \
+         and then it's yours. I only check that it doesn't contradict the facts we \
+         already settled; I never decide that it's the *right* outcome. That part \
+         was always yours.",
+    );
+    out
+}
+
+// ── structural fact-collision detection (simple by design) ──
+
+/// Whether two stated-fact texts **collide**: they're plausibly about the same
+/// thing (share a salient content word) yet carry *different concrete values*
+/// (different numbers / measurements). Returns a plain description of what they
+/// disagree about, or `None`. Deliberately simple — the honesty is in handing the
+/// conflict back, not in clever detection.
+fn facts_collide(a: &str, b: &str) -> Option<String> {
+    let na = numbers(a);
+    let nb = numbers(b);
+    if na.is_empty() || nb.is_empty() {
+        return None;
+    }
+    // A collision needs different numbers...
+    if na.iter().any(|x| nb.contains(x)) {
+        return None; // they share a number ⇒ not obviously contradicting
+    }
+    // ...and a shared salient noun (what the numbers are *about*).
+    let shared = shared_keyword(a, b)?;
+    Some(format!("how much/many {shared}"))
+}
+
+/// Extract integer-ish tokens from text (e.g. "$400", "30cm", "2 years" → 400,
+/// 30, 2). Used only to notice two facts asserting *different* concrete values.
+fn numbers(s: &str) -> Vec<i64> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_digit() {
+            cur.push(ch);
+        } else if !cur.is_empty() {
+            if let Ok(n) = cur.parse::<i64>() {
+                out.push(n);
+            }
+            cur.clear();
+        }
+    }
+    if let Ok(n) = cur.parse::<i64>() {
+        out.push(n);
+    }
+    out
+}
+
+/// A salient content word shared by both texts (lowercased, length ≥ 4, not a
+/// stopword) — a cheap proxy for "these facts are about the same thing".
+fn shared_keyword(a: &str, b: &str) -> Option<String> {
+    let words = |s: &str| -> Vec<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .filter(|w| w.len() >= 4 && !is_stopword(w))
+            .map(|w| w.to_string())
+            .collect()
+    };
+    let wa = words(a);
+    let wb = words(b);
+    wa.into_iter().find(|w| wb.contains(w))
+}
+
+fn is_stopword(w: &str) -> bool {
+    matches!(
+        w,
+        "that" | "this" | "they" | "them" | "with" | "from" | "have" | "were"
+            | "what" | "when" | "your" | "about" | "there" | "their" | "which"
+            | "would" | "could" | "should" | "been" | "just" | "only" | "into"
+            | "over" | "than" | "then" | "some" | "more" | "most" | "much"
+            | "many" | "said" | "says" | "very" | "really"
+    )
 }
 
 /// Render the whole session as a readable transcript (caucuses + joint).
@@ -689,20 +1318,26 @@ impl MediatorBrain for ScriptedBrain {
     }
 
     fn caucus(&self, _s: &Session, _party: &PartyId, input: &str) -> CaucusMove {
-        // The scripted brain reflects back and gently names a possible interest.
-        // (The live brain will do the real elicitation.)
+        // The scripted brain reflects back and gently names a possible interest to
+        // *check back* — it does not confirm it itself; the party does, in the
+        // `CheckBackInterest` loop. (The live brain does the real elicitation.)
         let interest = guess_interest(input);
+        let named = interest
+            .clone()
+            .unwrap_or_else(|| "being treated fairly here".to_string());
         let reply = format!(
-            "Thank you for telling me that — I want to make sure I've got it. \
-             It sounds like, underneath the specifics, what matters to you is {}. \
-             Is that close?",
-            interest.as_deref().unwrap_or("being treated fairly here")
+            "Thank you for telling me that — I want to make sure I've really got it, \
+             not just the surface of it. Take all the space you need.",
         );
         CaucusMove {
             reply,
-            interests: interest.into_iter().collect(),
+            interests: Vec::new(),
             claims: Vec::new(),
             done: true,
+            // The deterministic floor judges a party heard once they've spoken
+            // their piece; the live brain reads the room more finely.
+            heard_fully: true,
+            interest_to_check: Some(named),
         }
     }
 
@@ -1006,11 +1641,19 @@ mod tests {
         }
         assert_eq!(next_action(&s), MediatorAction::AskParty(ids[1].clone()));
 
-        // both heard now
+        // both have *spoken* now
         if let Some(th) = s.parties.iter_mut().find(|t| t.id == ids[1]) {
             th.caucus.push(Utterance::party(&ids[1], "my side too"));
         }
         assert!(s.everyone_spoken());
+
+        // …but readiness, not a state counter: a party who has spoken yet isn't
+        // *heard fully* gets more space before any joint move (read the room).
+        assert_eq!(next_action(&s), MediatorAction::AskParty(ids[0].clone()));
+        s.mark_heard_fully(&ids[0]);
+        assert_eq!(next_action(&s), MediatorAction::AskParty(ids[1].clone()));
+        s.mark_heard_fully(&ids[1]);
+        assert!(s.everyone_heard_fully());
 
         // with evidence in but unacknowledged, that's the next move
         s.submit_evidence(Evidence::fact(&ids[0], "a fact")).unwrap();
@@ -1030,7 +1673,8 @@ mod tests {
         s.crux_named = true;
         assert_eq!(next_action(&s), MediatorAction::ProposeOptions);
 
-        // a coherent proposal exists → invite agreement
+        // a coherent proposal exists, but the money is settled & certified →
+        // subtraction made visible comes first: name the residue.
         s.proposals.push(Proposal {
             id: "p1".into(),
             summary: "split".into(),
@@ -1038,10 +1682,23 @@ mod tests {
             coherent: true,
             accepted_by: Vec::new(),
         });
+        assert!(s.ledger_settled());
+        assert_eq!(next_action(&s), MediatorAction::NameResidue);
+
+        // residue named → invite agreement
+        s.residue_named = true;
         assert_eq!(next_action(&s), MediatorAction::InviteAgreement);
 
-        // someone accepts → close
+        // someone accepts, but the agreement isn't OWNED yet → co-author it
         s.proposals[0].accepted_by = vec![ids[0].clone()];
+        assert_eq!(next_action(&s), MediatorAction::CoAuthorAgreement);
+
+        // parties shape + sign the draft → only then does it land
+        s.open_draft_agreement("we agree, in our words", "mediator");
+        for id in &ids {
+            s.sign_draft(id);
+        }
+        assert!(s.agreement_owned());
         assert_eq!(next_action(&s), MediatorAction::Close);
     }
 
@@ -1053,10 +1710,12 @@ mod tests {
         for id in &ids {
             if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
                 th.caucus.push(Utterance::party(id, "heard"));
+                th.heard_fully = true;
             }
         }
         s.events.push("shared_ground".into());
         s.crux_named = true;
+        s.residue_named = true;
         s.proposals.push(Proposal {
             id: "p1".into(),
             summary: "split".into(),
@@ -1064,6 +1723,11 @@ mod tests {
             coherent: true,
             accepted_by: vec![ids[0].clone()],
         });
+        // …and a fully-owned (signed) agreement
+        s.open_draft_agreement("we agree, in our words", "mediator");
+        for id in &ids {
+            s.sign_draft(id);
+        }
         // we're at Close…
         assert_eq!(next_action(&s), MediatorAction::Close);
         // …but a late exhibit drops us back to acknowledgement
@@ -1095,5 +1759,218 @@ mod tests {
         assert!(out.evidence_acknowledged);
         let t = render_transcript(&out);
         assert!(t.contains("photo of the stain"));
+    }
+
+    // ── (1) read-the-room: readiness, not a state counter ──
+
+    #[test]
+    fn unheard_fully_party_gets_more_space_before_joint_work() {
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        // both have spoken, but neither has been heard *fully* yet
+        for id in &ids {
+            if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
+                th.caucus.push(Utterance::party(id, "venting…"));
+            }
+        }
+        assert!(s.everyone_spoken());
+        assert!(!s.everyone_heard_fully());
+        // the flow does NOT race to shared ground — it returns to give space
+        match next_action(&s) {
+            MediatorAction::AskParty(p) => assert_eq!(p, ids[0]),
+            other => panic!("expected more space for an unheard-fully party, got {other:?}"),
+        }
+        // once both are heard fully, joint work proceeds
+        for id in &ids {
+            s.mark_heard_fully(id);
+        }
+        assert!(s.everyone_heard_fully());
+        assert_eq!(next_action(&s), MediatorAction::ReflectSharedGround);
+    }
+
+    // ── (2) interest elicitation as a check-back loop ──
+
+    #[test]
+    fn interest_is_a_check_back_loop_owned_by_the_party() {
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        for id in &ids {
+            if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
+                th.caucus.push(Utterance::party(id, "my piece"));
+            }
+            s.mark_heard_fully(id);
+        }
+        // the mediator NAMES an interest but hasn't confirmed it → check-back owed
+        s.name_interest(&ids[0], "that you stopped showing up");
+        assert_eq!(s.needs_interest_check_back(), Some(ids[0].clone()));
+        assert_eq!(next_action(&s), MediatorAction::CheckBackInterest(ids[0].clone()));
+        // the wording reflects it back and asks
+        let cb = check_back_interest(&s, &ids[0]);
+        assert!(cb.contains("stopped showing up"));
+        assert!(cb.to_lowercase().contains("close") || cb.contains('?'));
+
+        // the party CORRECTS it — their words win, and only then is it surfaced
+        s.confirm_interest(&ids[0], Some("being treated as if I acted in good faith".into()));
+        let th = s.parties.iter().find(|t| t.id == ids[0]).unwrap();
+        assert!(th.interest_confirmed);
+        assert_eq!(
+            th.confirmed_interest.as_deref(),
+            Some("being treated as if I acted in good faith")
+        );
+        assert!(th.interests.iter().any(|i| i.contains("good faith")));
+        // no check-back pending now
+        assert_eq!(s.needs_interest_check_back(), None);
+    }
+
+    #[test]
+    fn scripted_caucus_runs_the_full_check_back_loop() {
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        for id in &ids {
+            if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
+                th.caucus.push(Utterance::party(id, "x"));
+            }
+        }
+        let inputs = ScriptedInputs::new()
+            .with("robin", &["I just want it to be fair and to feel respected."]);
+        let out = conduct(s, &ScriptedBrain, &inputs);
+        let robin = out.parties.iter().find(|t| t.id == "robin").unwrap();
+        // heard fully + a confirmed interest (the loop closed)
+        assert!(robin.heard_fully);
+        assert!(robin.interest_confirmed);
+        assert!(!robin.interests.is_empty());
+        // the transcript shows the check-back AND the party owning it
+        let caucus_txt: String = robin.caucus.iter().map(|u| u.text.clone()).collect::<Vec<_>>().join("\n");
+        assert!(caucus_txt.to_lowercase().contains("check"));
+        assert!(caucus_txt.contains("that's it"));
+    }
+
+    // ── (3) evidence collision → factual conflict, handed back ──
+
+    #[test]
+    fn colliding_facts_surface_a_factual_conflict_never_decided() {
+        let mut s = roommate_session();
+        // two parties, two different numbers about the SAME thing (the stain)
+        s.submit_evidence(Evidence::fact("robin", "The stain is 10 cm across."))
+            .unwrap();
+        s.submit_evidence(Evidence::fact("sam", "The stain is 40 cm across."))
+            .unwrap();
+        assert!(s.has_factual_conflict());
+        let c = &s.factual_conflicts[0];
+        assert!(c.about.contains("stain"));
+        // it is structurally a *between two parties* collision
+        assert!(c.between.0 == "robin" || c.between.0 == "sam");
+
+        let msg = surface_factual_conflict(&s);
+        // names exactly what's contested and refuses to rule
+        assert!(msg.contains("10 cm") && msg.contains("40 cm"));
+        let low = msg.to_lowercase();
+        assert!(low.contains("evidence") && low.contains("not"));
+        assert!(low.contains("decide") || low.contains("settle") || low.contains("right"));
+
+        // same number ⇒ no collision; agreeing facts don't fire
+        let mut s2 = roommate_session();
+        s2.submit_evidence(Evidence::fact("robin", "The stain is 30 cm across.")).unwrap();
+        s2.submit_evidence(Evidence::fact("sam", "The stain is 30 cm across.")).unwrap();
+        assert!(!s2.has_factual_conflict());
+    }
+
+    #[test]
+    fn next_action_surfaces_factual_conflict_after_acknowledgement() {
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        for id in &ids {
+            if let Some(th) = s.parties.iter_mut().find(|t| &t.id == id) {
+                th.caucus.push(Utterance::party(id, "x"));
+            }
+            s.mark_heard_fully(id);
+        }
+        s.submit_evidence(Evidence::fact(&ids[0], "It is 5 inches wide.")).unwrap();
+        s.submit_evidence(Evidence::fact(&ids[1], "It is 20 inches wide.")).unwrap();
+        // acknowledge first…
+        assert_eq!(next_action(&s), MediatorAction::AcknowledgeEvidence);
+        s.evidence_acknowledged = true;
+        // …then the collision is surfaced before joint shared-ground work
+        assert!(s.has_factual_conflict());
+        assert_eq!(next_action(&s), MediatorAction::SurfaceFactualConflict);
+        s.conflicts_surfaced = true;
+        assert_eq!(next_action(&s), MediatorAction::ReflectSharedGround);
+    }
+
+    // ── (4) subtraction made visible: the residue ──
+
+    #[test]
+    fn residue_is_named_once_money_is_settled() {
+        let s = roommate_session();
+        // roommate has a certified refund ⇒ the ledger is settled
+        assert!(s.ledger_settled());
+        let r = name_residue(&s);
+        let low = r.to_lowercase();
+        assert!(low.contains("never") && low.contains("money"));
+        // explicit that it can't be certified (the honesty)
+        assert!(low.contains("certif") || low.contains("pretend"));
+    }
+
+    #[test]
+    fn residue_draws_from_confirmed_interests() {
+        let mut s = roommate_session();
+        s.name_interest("robin", "feeling that your effort was actually seen");
+        s.confirm_interest("robin", None);
+        let cands = s.residue_candidates();
+        assert!(cands.iter().any(|c| c.contains("effort was actually seen")));
+    }
+
+    // ── (5) co-authored, owned agreement ──
+
+    #[test]
+    fn agreement_is_co_authored_and_signing_tracks_the_exact_text() {
+        let mut s = roommate_session();
+        let ids = s.party_ids();
+        s.open_draft_agreement("first draft", "mediator");
+        assert!(!s.agreement_owned());
+        for id in &ids {
+            s.sign_draft(id);
+        }
+        assert!(s.agreement_owned());
+        // a revision (in their words) CLEARS signatures — must be re-owned
+        s.revise_draft(&ids[0], "our own words now");
+        assert!(!s.agreement_owned());
+        let d = s.draft_agreement.as_ref().unwrap();
+        assert_eq!(d.text, "our own words now");
+        assert!(d.signed_by.is_empty());
+        // re-sign the new text → owned again
+        for id in &ids {
+            s.sign_draft(id);
+        }
+        assert!(s.agreement_owned());
+    }
+
+    #[test]
+    fn co_author_text_is_a_scaffold_not_a_verdict() {
+        let s = roommate_session();
+        let text = co_author_agreement(&s);
+        // first person plural, in their words, explicitly editable, never "right"
+        assert!(text.contains("We,") || text.contains("we"));
+        let low = text.to_lowercase();
+        assert!(low.contains("change any word") || low.contains("your words"));
+        assert!(low.contains("never decide") || low.contains("right"));
+    }
+
+    #[test]
+    fn full_session_names_residue_and_co_authors_the_agreement() {
+        let s = roommate_session();
+        let inputs = ScriptedInputs::new()
+            .with("robin", &["it was wear and tear and I want to feel respected"])
+            .with("sam", &["it's damage and I want this to be fair"]);
+        let out = conduct(s, &ScriptedBrain, &inputs);
+        assert_eq!(out.phase, Phase::Agreement);
+        // residue was named (subtraction made visible)
+        assert!(out.events.iter().any(|e| e == "residue"));
+        assert!(!out.residue.is_empty());
+        // a draft agreement exists and both signed it (owned)
+        assert!(out.agreement_owned());
+        let t = render_transcript(&out);
+        assert!(t.contains("never really about it") || t.to_lowercase().contains("residue") || t.contains("what's left"));
+        assert!(t.contains("in your words"));
     }
 }
