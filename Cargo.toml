@@ -11,7 +11,9 @@ members = [
     "crates/mediator-session",
     "crates/mediator-audit",
     "crates/mediator-ontology",
+    "crates/mediator-commons",
     "crates/mediator-demo",
+    "crates/mediator-pact",
 ]
 
 [workspace.package]
@@ -28,6 +30,7 @@ mediator-tui = { path = "crates/mediator-tui" }
 mediator-session = { path = "crates/mediator-session" }
 mediator-audit = { path = "crates/mediator-audit" }
 mediator-ontology = { path = "crates/mediator-ontology" }
+mediator-commons = { path = "crates/mediator-commons" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
