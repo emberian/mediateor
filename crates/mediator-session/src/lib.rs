@@ -22,6 +22,9 @@ use mediator_types::{Analysis, Dispute, Formula, PartyId, Receipt, Settlement};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod live;
+pub use live::{LiveBrain, DEFAULT_MEDIATOR_MODEL, DEFAULT_REGION};
+
 // ───────────────────────────── session state ─────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

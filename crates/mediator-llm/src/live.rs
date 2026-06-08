@@ -520,6 +520,67 @@ pub(crate) fn tally_consensus(readings: &[Reading]) -> (Option<Formula>, String)
 /// The models run **concurrently**. A model that errors or returns unparseable
 /// text yields a `Reading` with `formula: None` rather than failing the whole
 /// council, so one flaky model can't sink the panel.
+/// A single Bedrock Converse call returning the model's text. Reused by the
+/// mediation session for the mediator's *voice* — its prose, not load-bearing
+/// facts (those stay certified by the prover). Uses the default AWS credential
+/// chain (the EC2 instance role on the box; `~/.aws` locally).
+pub async fn converse_text(
+    region: &str,
+    model_id: &str,
+    system: &str,
+    user: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> anyhow::Result<String> {
+    use aws_sdk_bedrockruntime::types::{
+        ContentBlock, ConversationRole, InferenceConfiguration, Message, SystemContentBlock,
+    };
+
+    let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.to_string()))
+        .load()
+        .await;
+    let client = aws_sdk_bedrockruntime::Client::new(&shared);
+
+    let message = Message::builder()
+        .role(ConversationRole::User)
+        .content(ContentBlock::Text(user.to_string()))
+        .build()
+        .map_err(|e| anyhow::anyhow!("build message: {e}"))?;
+    let inference = InferenceConfiguration::builder()
+        .max_tokens(max_tokens)
+        .temperature(temperature)
+        .build();
+
+    let resp = client
+        .converse()
+        .model_id(model_id)
+        .system(SystemContentBlock::Text(system.to_string()))
+        .messages(message)
+        .inference_config(inference)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("converse({model_id}): {e}"))?;
+
+    let out = resp
+        .output()
+        .ok_or_else(|| anyhow::anyhow!("converse({model_id}): no output"))?;
+    let msg = out
+        .as_message()
+        .map_err(|_| anyhow::anyhow!("converse({model_id}): output not a message"))?;
+    let mut text = String::new();
+    for block in msg.content() {
+        if let ContentBlock::Text(t) = block {
+            text.push_str(t);
+        }
+    }
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        anyhow::bail!("converse({model_id}): empty text output");
+    }
+    Ok(text)
+}
+
 pub async fn council_formalize_live(
     claim: &str,
     sig: &[Sig],

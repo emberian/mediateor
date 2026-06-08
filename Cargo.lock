@@ -1464,9 +1464,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "mediator-core",
+ "mediator-llm",
  "mediator-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
