@@ -81,14 +81,14 @@ pub fn analyze(
     for item in &dispute.ledger.items {
         if !item.disputed {
             analysis.shared_core.push(format!(
-                "You both agree the {} was {} and comes out of the deposit.",
+                "You both agree the {} ({}) is not in dispute.",
                 item.label.to_lowercase(),
                 money(item.amount_cents)
             ));
         }
     }
     analysis.shared_core.push(format!(
-        "The deposit held is {}.",
+        "The amount at stake is {}.",
         money(dispute.ledger.deposit_cents)
     ));
 
@@ -110,13 +110,20 @@ pub fn analyze(
     );
 
     if proved(&damage_v) && proved(&wear_v) {
-        analysis.ledger_findings.push(format!(
-            "{} back if the stain is ordinary wear; {} back if it counts as damage.",
-            money(refund_wear),
-            money(refund_damage)
-        ));
-        // The rest hinges on the crux, so the headline refund is the tenant's
-        // best case (wear world). Honest: it is the *contingent* figure.
+        analysis.ledger_findings.push(match crux_gloss(dispute) {
+            Some(g) => format!(
+                "If {g}: the certified amount is {}. If not: {}.",
+                money(refund_damage),
+                money(refund_wear)
+            ),
+            None => format!(
+                "The certified amount is {} or {}, depending on the one open question.",
+                money(refund_damage),
+                money(refund_wear)
+            ),
+        });
+        // The rest hinges on the crux; the headline figure is the
+        // crux-does-not-hold world. Honest: it is the *contingent* figure.
         analysis.ledger_refund_cents = Some(refund_wear);
     } else {
         // Do not overclaim a number the host could not certify.
@@ -143,15 +150,15 @@ pub fn analyze(
     if proved(&overclaim_v) {
         if let Some(c) = claimed {
             analysis.ledger_findings.push(format!(
-                "The verbal figure of {} in deductions is not what the itemization supports — \
-                 the itemized deductions total {}.",
+                "The stated figure of {} is not what the itemization supports — \
+                 the items total {}.",
                 money(c),
                 money(itemized)
             ));
             // Framed kindly in `dissolved`: a number to correct, not a lie.
             analysis.dissolved.push(format!(
-                "The {}-vs-{} gap on the deductions is a number to correct, not a deception: \
-                 the itemization simply comes to {}.",
+                "The {}-vs-{} gap is a number to correct, not a deception: \
+                 the items simply add up to {}.",
                 money(c),
                 money(itemized),
                 money(itemized)
@@ -176,23 +183,28 @@ pub fn analyze(
     // The kernel only declares a crux when it has *proved the reduction* (the
     // iff) AND honestly *cannot decide* the predicate either way.
     if proved(&crux_iff_v) && undecided(&crux_damage_v) && undecided(&crux_wear_v) {
-        analysis.crux = Some(
-            "The whole carpet question reduces to one thing: whether the stain is chargeable \
-             damage or ordinary wear. That is the single fact the kernel cannot — and will not \
-             — decide for you. Everything else above follows from your answer to it."
+        analysis.crux = Some(match crux_gloss(dispute) {
+            Some(g) => format!(
+                "The whole dispute reduces to one question: whether {g}. That is the single \
+                 fact the kernel cannot — and will not — decide for you. Everything else above \
+                 follows from your answer to it."
+            ),
+            None => "The whole dispute reduces to a single contested point, which the kernel \
+                     cannot — and will not — decide for you. Everything else above follows \
+                     from your answer to it."
                 .to_string(),
-        );
+        });
     } else if proved(&crux_damage_v) || proved(&crux_wear_v) {
         // The host actually settled it; report that instead of a false "Unknown".
         analysis.crux = Some(
-            "The host was able to settle the carpet question from the stipulated facts; it is \
-             not, in this dispute, the open crux."
+            "The host was able to settle the contested question from the stipulated facts; it \
+             is not, in this dispute, the open crux."
                 .to_string(),
         );
     }
 
     // ── genuine conflicts: the irreducible knot ─────────────────────────
-    if let Some(conflict) = stain_conflict(dispute) {
+    if let Some(conflict) = crux_conflict(dispute) {
         analysis.genuine_conflicts.push(conflict);
     }
 
@@ -282,9 +294,39 @@ fn claimed_total_value(dispute: &Dispute) -> Option<i64> {
     None
 }
 
-/// The genuine conflict over `stain_is_damage`: Robin (r1) vs Sam (s1).
-fn stain_conflict(dispute: &Dispute) -> Option<Conflict> {
-    // Find the two active claims that are P and ¬P over the same atom.
+/// The crux predicate name: the right-hand side of the first stipulated `Iff`
+/// whose RHS is a nullary atom (e.g. `stain_is_damage`, `work_met_spec`).
+fn crux_predicate(dispute: &Dispute) -> Option<String> {
+    for f in &dispute.stipulated {
+        if let Formula::Iff(_, rhs) = f {
+            if let Formula::Atom(Term::App(name, args)) = &**rhs {
+                if args.is_empty() {
+                    return Some(name.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The plain-English gloss of the crux predicate, taken from whichever party's
+/// signature declares it. This is what makes the prose dispute-agnostic.
+fn crux_gloss(dispute: &Dispute) -> Option<String> {
+    let name = crux_predicate(dispute)?;
+    for p in &dispute.parties {
+        for s in &p.signature {
+            if s.name == name && !s.gloss.is_empty() {
+                return Some(s.gloss.clone());
+            }
+        }
+    }
+    None
+}
+
+/// The genuine conflict over the crux predicate: the two active claims that
+/// assert `P` and `¬P` over it. Dispute-agnostic — works for any scenario.
+fn crux_conflict(dispute: &Dispute) -> Option<Conflict> {
+    let pred = crux_predicate(dispute)?;
     let mut pos: Option<&mediator_types::Claim> = None;
     let mut neg: Option<&mediator_types::Claim> = None;
     for c in &dispute.claims {
@@ -292,12 +334,10 @@ fn stain_conflict(dispute: &Dispute) -> Option<Conflict> {
             continue;
         }
         match &c.formula {
-            Formula::Atom(Term::App(n, a)) if a.is_empty() && n == "stain_is_damage" => {
-                pos = Some(c)
-            }
+            Formula::Atom(Term::App(n, a)) if a.is_empty() && *n == pred => pos = Some(c),
             Formula::Not(inner) => {
                 if let Formula::Atom(Term::App(n, a)) = &**inner {
-                    if a.is_empty() && n == "stain_is_damage" {
+                    if a.is_empty() && *n == pred {
                         neg = Some(c);
                     }
                 }
@@ -306,14 +346,22 @@ fn stain_conflict(dispute: &Dispute) -> Option<Conflict> {
         }
     }
     match (pos, neg) {
-        (Some(p), Some(n)) => Some(Conflict {
-            description:
-                "Whether the carpet stain is chargeable damage or ordinary wear — a real \
-                 disagreement of fact and judgment, not just different words."
+        (Some(p), Some(n)) => {
+            let desc = match crux_gloss(dispute) {
+                Some(g) => format!(
+                    "Whether {g} — a real disagreement of fact and judgment, not just \
+                     different words."
+                ),
+                None => "The one contested point — a real disagreement of fact and judgment, \
+                         not just different words."
                     .to_string(),
-            parties: vec![n.party.clone(), p.party.clone()],
-            claim_ids: vec![n.id.clone(), p.id.clone()],
-        }),
+            };
+            Some(Conflict {
+                description: desc,
+                parties: vec![n.party.clone(), p.party.clone()],
+                claim_ids: vec![n.id.clone(), p.id.clone()],
+            })
+        }
         _ => None,
     }
 }
@@ -390,7 +438,7 @@ mod tests {
         assert!(a
             .ledger_findings
             .iter()
-            .any(|f| f.contains("$1050.00 back if the stain is ordinary wear")));
+            .any(|f| f.contains("$1050.00") && f.contains("$750.00")));
         assert!(a
             .ledger_findings
             .iter()
@@ -399,7 +447,7 @@ mod tests {
         // crux isolated and handed back
         let crux = a.crux.as_ref().expect("crux should be set");
         assert!(crux.contains("will not"));
-        assert!(crux.contains("damage or ordinary wear"));
+        assert!(crux.contains("ordinary wear"));
 
         // genuine conflict over stain_is_damage, robin & sam
         assert_eq!(a.genuine_conflicts.len(), 1);

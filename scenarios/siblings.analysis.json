@@ -1,13 +1,25 @@
 {
   "analysis": {
-    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "crux": "The whole dispute reduces to one question: whether the $8,000 their parent gave Jordan counts as an advance on inheritance. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
     "dissolved": [
-      "The $10000.00-vs-$14000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $14000.00."
+      "The $10000.00-vs-$14000.00 gap is a number to correct, not a deception: the items simply add up to $14000.00."
     ],
-    "genuine_conflicts": [],
+    "genuine_conflicts": [
+      {
+        "claim_ids": [
+          "j1",
+          "a1"
+        ],
+        "description": "Whether the $8,000 their parent gave Jordan counts as an advance on inheritance — a real disagreement of fact and judgment, not just different words.",
+        "parties": [
+          "jordan",
+          "alex"
+        ]
+      }
+    ],
     "ledger_findings": [
-      "$34000.00 back if the stain is ordinary wear; $26000.00 back if it counts as damage.",
-      "The verbal figure of $10000.00 in deductions is not what the itemization supports — the itemized deductions total $14000.00."
+      "If the $8,000 their parent gave Jordan counts as an advance on inheritance: the certified amount is $26000.00. If not: $34000.00.",
+      "The stated figure of $10000.00 is not what the itemization supports — the items total $14000.00."
     ],
     "ledger_refund_cents": 3400000,
     "settlements": [
@@ -50,8 +62,8 @@
     ],
     "shared_core": [
       "You both stipulate: Share reduced exactly when gift was advance.",
-      "You both agree the shared funeral costs was $6000.00 and comes out of the deposit.",
-      "The deposit held is $40000.00."
+      "You both agree the shared funeral costs ($6000.00) is not in dispute.",
+      "The amount at stake is $40000.00."
     ]
   },
   "receipts": [

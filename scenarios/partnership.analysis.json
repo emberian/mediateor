@@ -1,13 +1,25 @@
 {
   "analysis": {
-    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "crux": "The whole dispute reduces to one question: whether Jordan's departure constituted a breach of the vesting cliff agreement. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
     "dissolved": [
-      "The $35000.00-vs-$30000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $30000.00."
+      "The $35000.00-vs-$30000.00 gap is a number to correct, not a deception: the items simply add up to $30000.00."
     ],
-    "genuine_conflicts": [],
+    "genuine_conflicts": [
+      {
+        "claim_ids": [
+          "s1",
+          "r1"
+        ],
+        "description": "Whether Jordan's departure constituted a breach of the vesting cliff agreement — a real disagreement of fact and judgment, not just different words.",
+        "parties": [
+          "jordan",
+          "priya"
+        ]
+      }
+    ],
     "ledger_findings": [
-      "$14000.00 back if the stain is ordinary wear; $2000.00 back if it counts as damage.",
-      "The verbal figure of $35000.00 in deductions is not what the itemization supports — the itemized deductions total $30000.00."
+      "If Jordan's departure constituted a breach of the vesting cliff agreement: the certified amount is $2000.00. If not: $14000.00.",
+      "The stated figure of $35000.00 is not what the itemization supports — the items total $30000.00."
     ],
     "ledger_refund_cents": 1400000,
     "settlements": [
@@ -51,8 +63,8 @@
     ],
     "shared_core": [
       "You both stipulate: Clawback applies exactly when departure breached vesting.",
-      "You both agree the shared business checking account was $18000.00 and comes out of the deposit.",
-      "The deposit held is $32000.00."
+      "You both agree the shared business checking account ($18000.00) is not in dispute.",
+      "The amount at stake is $32000.00."
     ]
   },
   "receipts": [

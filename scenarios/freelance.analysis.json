@@ -1,13 +1,25 @@
 {
   "analysis": {
-    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "crux": "The whole dispute reduces to one question: whether the delivered website met the agreed specification. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
     "dissolved": [
-      "The $5500.00-vs-$5000.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $5000.00."
+      "The $5500.00-vs-$5000.00 gap is a number to correct, not a deception: the items simply add up to $5000.00."
     ],
-    "genuine_conflicts": [],
+    "genuine_conflicts": [
+      {
+        "claim_ids": [
+          "r1",
+          "s1"
+        ],
+        "description": "Whether the delivered website met the agreed specification — a real disagreement of fact and judgment, not just different words.",
+        "parties": [
+          "maya",
+          "theo"
+        ]
+      }
+    ],
     "ledger_findings": [
-      "$3000.00 back if the stain is ordinary wear; $0.00 back if it counts as damage.",
-      "The verbal figure of $5500.00 in deductions is not what the itemization supports — the itemized deductions total $5000.00."
+      "If the delivered website met the agreed specification: the certified amount is $0.00. If not: $3000.00.",
+      "The stated figure of $5500.00 is not what the itemization supports — the items total $5000.00."
     ],
     "ledger_refund_cents": 300000,
     "settlements": [
@@ -51,8 +63,8 @@
     ],
     "shared_core": [
       "You both stipulate: Client owes final payment exactly when work met spec.",
-      "You both agree the initial deposit payment (50%) was $2000.00 and comes out of the deposit.",
-      "The deposit held is $5000.00."
+      "You both agree the initial deposit payment (50%) ($2000.00) is not in dispute.",
+      "The amount at stake is $5000.00."
     ]
   },
   "receipts": [

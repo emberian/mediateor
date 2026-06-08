@@ -135,9 +135,22 @@ impressive.
 
 ## Disputes
 
-| Scenario | What it demonstrates |
-|---|---|
-| `roommate.json` | Security-deposit dispute between Robin and Sam. The ledger refutes an over-claim by arithmetic; the entire money question reduces to one predicate (`stain_is_damage`), which the kernel hands back undecided; Adjusted Winner splits the furniture envy-free. **The canonical demo.** |
+Five worked disputes ship in `scenarios/` — each one runs through the real
+Isabelle gate and ships with a precomputed analysis cache, so the web app opens
+on all of them instantly.
+
+| Scenario | The story | The one open question |
+|---|---|---|
+| `roommate` | Robin moves out; Sam holds the $1,200 deposit. A carpet stain and some shared furniture. | Is the stain chargeable damage, or ordinary wear? |
+| `freelance` | Maya hired Theo for a $5,000 website; she says it's missing features, he says he delivered the spec. | Did the work meet the agreed spec? |
+| `partnership` | Priya and Jordan wind down their studio; a one-year equity cliff and a contested departure date. | Did Jordan's departure breach the vesting agreement? |
+| `separation` | Alex and Sam part ways over a shared-apartment deposit — wall scuffs and a cracked tile. | Is the damage attributable to Alex, or ordinary wear? |
+| `siblings` | Two siblings divide a parent's estate; an $8,000 gift to one of them years ago. | Was that money an advance on the inheritance, or a gift? |
+
+In every one: the ledger is certified by arithmetic, an over-claim is refuted,
+and the whole money question is reduced to that single predicate — which the
+kernel **hands back undecided**, because it's a human question, not a provable
+one.
 
 ## Why this shape (the honest part)
 

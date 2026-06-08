@@ -1,13 +1,25 @@
 {
   "analysis": {
-    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "crux": "The whole dispute reduces to one question: whether the apartment damage is attributable to Alex rather than ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
     "dissolved": [
-      "The $400.00-vs-$350.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $350.00."
+      "The $400.00-vs-$350.00 gap is a number to correct, not a deception: the items simply add up to $350.00."
     ],
-    "genuine_conflicts": [],
+    "genuine_conflicts": [
+      {
+        "claim_ids": [
+          "r1",
+          "s1"
+        ],
+        "description": "Whether the apartment damage is attributable to Alex rather than ordinary wear — a real disagreement of fact and judgment, not just different words.",
+        "parties": [
+          "alex",
+          "sam"
+        ]
+      }
+    ],
     "ledger_findings": [
-      "$1400.00 back if the stain is ordinary wear; $1150.00 back if it counts as damage.",
-      "The verbal figure of $400.00 in deductions is not what the itemization supports — the itemized deductions total $350.00."
+      "If the apartment damage is attributable to Alex rather than ordinary wear: the certified amount is $1150.00. If not: $1400.00.",
+      "The stated figure of $400.00 is not what the itemization supports — the items total $350.00."
     ],
     "ledger_refund_cents": 140000,
     "settlements": [
@@ -50,8 +62,8 @@
     ],
     "shared_core": [
       "You both stipulate: Deposit deduction applies exactly when damage attributable to partner.",
-      "You both agree the professional move-out cleaning (shared) was $100.00 and comes out of the deposit.",
-      "The deposit held is $1500.00."
+      "You both agree the professional move-out cleaning (shared) ($100.00) is not in dispute.",
+      "The amount at stake is $1500.00."
     ]
   },
   "receipts": [

@@ -1,8 +1,8 @@
 {
   "analysis": {
-    "crux": "The whole carpet question reduces to one thing: whether the stain is chargeable damage or ordinary wear. That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
+    "crux": "The whole dispute reduces to one question: whether the carpet stain counts as chargeable damage (vs. ordinary wear). That is the single fact the kernel cannot — and will not — decide for you. Everything else above follows from your answer to it.",
     "dissolved": [
-      "The $500.00-vs-$450.00 gap on the deductions is a number to correct, not a deception: the itemization simply comes to $450.00."
+      "The $500.00-vs-$450.00 gap is a number to correct, not a deception: the items simply add up to $450.00."
     ],
     "genuine_conflicts": [
       {
@@ -10,7 +10,7 @@
           "r1",
           "s1"
         ],
-        "description": "Whether the carpet stain is chargeable damage or ordinary wear — a real disagreement of fact and judgment, not just different words.",
+        "description": "Whether the carpet stain counts as chargeable damage (vs. ordinary wear) — a real disagreement of fact and judgment, not just different words.",
         "parties": [
           "robin",
           "sam"
@@ -18,8 +18,8 @@
       }
     ],
     "ledger_findings": [
-      "$1050.00 back if the stain is ordinary wear; $750.00 back if it counts as damage.",
-      "The verbal figure of $500.00 in deductions is not what the itemization supports — the itemized deductions total $450.00."
+      "If the carpet stain counts as chargeable damage (vs. ordinary wear): the certified amount is $750.00. If not: $1050.00.",
+      "The stated figure of $500.00 is not what the itemization supports — the items total $450.00."
     ],
     "ledger_refund_cents": 105000,
     "settlements": [
@@ -63,8 +63,8 @@
     ],
     "shared_core": [
       "You both stipulate: The tenant must bear the carpet repair cost exactly when the carpet stain is chargeable damage.",
-      "You both agree the professional cleaning was $150.00 and comes out of the deposit.",
-      "The deposit held is $1200.00."
+      "You both agree the professional cleaning ($150.00) is not in dispute.",
+      "The amount at stake is $1200.00."
     ]
   },
   "receipts": [
