@@ -666,6 +666,13 @@ async fn gallery(State(state): State<SharedState>) -> Markup {
                 "must not be fudged, and hands back the one question that's "
                 "honestly yours to answer."
             }
+            @if let Some(first) = state.disputes.first() {
+                div .hero-cta {
+                    style { (PreEscaped(".hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.3rem}.hero-cta a{padding:.62rem 1.05rem;border-radius:12px;text-decoration:none;font-weight:500}.cta-primary{background:#c06a3e;color:#fff}.cta-primary:hover{background:#a85a32}.cta-secondary{border:1px solid #d8cbb6;color:inherit}.cta-secondary:hover{background:#fbf6ee}")) }
+                    a .cta-primary href=(format!("/session/{}", first.id)) { "▶ Watch a mediation" }
+                    a .cta-secondary href=(format!("/dispute/{}", first.id)) { "Talk to the mediator yourself →" }
+                }
+            }
         }
 
         @if state.is_empty() {

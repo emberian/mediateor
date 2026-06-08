@@ -67,6 +67,29 @@ agree on (it's more than you think), here's the one real knot, and here are fair
 options.* The verdict is never "you're wrong." It's *here is the smallest world
 that holds you both.*
 
+## The session — the AI actually mediating
+
+The kernel is the trust spine; the **session** is the point. An impartial guide
+with no stake in the outcome conducts a real mediation — and the certified facts
+sit quietly underneath so it can't fudge a number, paper over a contradiction, or
+be steered by whoever wrote the more sympathetic prompt. *The prover is the
+stand-in for the professional who isn't in the room* — which is what lets a
+community opt into this instead of a worse escalation, with no professional
+present and a human always one button away.
+
+- **`GET /session/:dispute`** — watch a full mediation, conducted end to end: the
+  private caucuses (with the interest the mediator heard *under* each position),
+  the shared ground, the one open question handed back, and the fair options.
+- **`GET /talk/:dispute/:party`** — *talk to the mediator yourself.* Speak as one
+  party; it listens and reflects in real back-and-forth (htmx). When you're ready,
+  "see where this could land" surfaces the certified shared ground, the crux, and
+  the fair options — tying the felt conversation to the trustworthy outcome.
+
+On the deployed box the session is conducted **live by Claude Haiku 4.5** (Bedrock,
+instance-role auth, no keys); offline it falls back to a deterministic scripted
+voice so it always runs. The mediator writes the *human* part; it never invents a
+fact or a settlement — those stay load-bearing from the prover.
+
 ## Architecture
 
 The cathedral is **backstage**. Only the LLM walks its halls; the people in the
@@ -98,6 +121,7 @@ morphisms (the dead branch).
 | `mediator-llm` | the untrusted operator + council (AWS Bedrock, LM Studio); degrades to a scripted operator offline |
 | `mediator-tui` | two projections of one analysis, in the terminal (ratatui) |
 | `mediator-web` | the same two faces as a simple, delightful htmx page (axum + maud) |
+| `mediator-session` | **the AI actually mediating** — the session state machine + the mediator's voice (a deterministic scripted brain and a live Bedrock brain) |
 | `mediator-demo` | the `mediator` binary — wires it all together on a scenario |
 | `isabelle/` | `Keystone.thy` (the proven foundation stone) + `lib/` (the deontic + defeasible normative layer) |
 
@@ -185,10 +209,12 @@ made cheap and visible. (Reading in `pdfs/`; design in `ARCHITECTURE.md`.)
 
 ## Status
 
-Early, but real. The keystone builds; the components are implemented and tested;
-end-to-end integration of the `mediator` binary and the web page is being wired.
-Expect rough edges — this is the CLI/TUI kernel that proves the machinery before
-pug gives it a proper face.
+Real and live. The keystone builds; the kernel certifies five disputes through
+real Isabelle; and the **session** — the AI actually mediating, interactively and
+live — runs end to end and is deployed (password-protected) for demo. Still young,
+still honest about its edges, but the core of the vision works: a person can be
+heard by an impartial guide with no stake in the outcome, and shown the fair,
+checked shape of their disagreement.
 
 ## License
 
