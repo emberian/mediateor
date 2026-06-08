@@ -190,6 +190,41 @@ async fn interactive_talk_round_trip() {
 }
 
 #[tokio::test]
+async fn talk_where_shows_certified_resolution() {
+    let app = router(fixture_state());
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/talk/roommate/sam").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_string(resp).await;
+    // the "see where this could land" button is on the page
+    assert!(html.contains("see where this could land"));
+    // derive the session id from the say-url
+    let say = html
+        .split("hx-post=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap_or("");
+    let sid = say.trim_start_matches("/talk/").split('/').next().unwrap_or("");
+    assert!(sid.starts_with('s'), "sid: {sid}");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/talk/{sid}/sam/where"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let frag = body_string(resp).await;
+    assert!(frag.contains("bigger picture"));
+    assert!(frag.to_lowercase().contains("checked by the prover"));
+}
+
+#[tokio::test]
 async fn party_robin_returns_200_with_kind_copy() {
     let app = router(fixture_state());
     let resp = app
