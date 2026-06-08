@@ -30,6 +30,7 @@ use axum::{
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use mediator_types::{Analysis, Dispute, Formula, Party, Receipt, Settlement, Sig, Term};
+use mediator_session::{conduct, LiveBrain, ScriptedBrain, ScriptedInputs, Session};
 use tokio::sync::RwLock;
 
 pub use load::{DisputeRecord, discover_disputes, load_record, scenarios_dir};
@@ -218,6 +219,7 @@ pub fn router(state: AppState) -> Router {
         .route("/dispute/:id", get(seat_picker))
         .route("/party/:dispute_id/:party_id", get(party_view))
         .route("/operator/:dispute_id", get(operator_view))
+        .route("/session/:dispute_id", get(mediation_session))
         .route(
             "/settlement/:dispute_id/:idx/accept",
             post(settlement_accept),
@@ -278,6 +280,163 @@ fn money(cents: i64) -> String {
     let c = cents.unsigned_abs();
     format!("{sign}${}.{:02}", c / 100, c % 100)
 }
+
+// ─────────────────────────── the mediation session ──────────────────────────
+
+/// Conduct a full mediation over a dispute and render it as a readable session.
+/// On the box (`MEDIATEOR_LIVE_LLM` set) the model conducts it (Claude Haiku
+/// 4.5); otherwise a deterministic scripted voice. The certified facts and
+/// fair-division settlements are never model-invented — they're the trust spine.
+async fn mediation_session(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    let Some(d) = state.get(&id) else {
+        return not_found("We don't have a record of that dispute.");
+    };
+
+    let session = Session::new(d.dispute.clone(), d.analysis.clone(), d.receipts.clone());
+    let inputs = scripted_inputs_for(&d.dispute);
+    let live = state.live_llm_enabled;
+
+    // `conduct` is sync and a live brain blocks on its own runtime, so run it off
+    // the async executor.
+    let out = tokio::task::spawn_blocking(move || {
+        if live {
+            if let Ok(b) = LiveBrain::new() {
+                return conduct(session, &b, &inputs);
+            }
+        }
+        conduct(session, &ScriptedBrain, &inputs)
+    })
+    .await
+    .expect("session conduct task");
+
+    let voice = if live { "Claude Haiku 4.5" } else { "a scripted preview voice" };
+    let markup = page(
+        &format!("Mediation — {}", out.title),
+        render_session(&out, voice),
+    );
+    (StatusCode::OK, markup).into_response()
+}
+
+/// Opening caucus lines per party — rich, hand-written for the roommate demo;
+/// otherwise gentle generic openers so any scenario runs.
+fn scripted_inputs_for(dispute: &Dispute) -> ScriptedInputs {
+    if dispute.parties.iter().any(|p| p.id == "robin") {
+        return ScriptedInputs::new()
+            .with(
+                "robin",
+                &[
+                    "Honestly I just don't think I should pay for that stain — it was wear and tear.",
+                    "And look, I wasn't around for the deep clean, but I pulled my weight the whole lease.",
+                ],
+            )
+            .with(
+                "sam",
+                &["The carpet is real damage and it's only fair that Robin covers it. I just want this to be fair."],
+            );
+    }
+    let mut inp = ScriptedInputs::new();
+    for p in &dispute.parties {
+        inp = inp.with(
+            &p.id,
+            &[
+                "Here's how I see it, in my own words.",
+                "I want an outcome that's actually fair to both of us.",
+            ],
+        );
+    }
+    inp
+}
+
+fn render_session(s: &Session, voice: &str) -> Markup {
+    html! {
+        (brandbar(Some(html! { (&s.title) })))
+        style { (PreEscaped(SESSION_CSS)) }
+
+        header .interior-head {
+            h1 { "A mediation, conducted" }
+            p .lede {
+                "Not a verdict — a " em { "mediation" } ". An impartial guide with no "
+                "stake in the outcome speaks with each person, finds what they "
+                "already agree on, names the one real disagreement and hands it "
+                "back, and offers fair options. The facts it leans on were checked "
+                "by the prover, so it can't fudge a number or paper over a "
+                "contradiction."
+            }
+        }
+
+        @for th in &s.parties {
+            @if !th.caucus.is_empty() {
+                section .caucus {
+                    h2 .session-h { "In private with " (party_first_name(&th.display_name)) }
+                    div .chat {
+                        @for u in &th.caucus { (bubble(s, u)) }
+                    }
+                    @if !th.interests.is_empty() {
+                        p .interest {
+                            "What the mediator heard underneath: " (th.interests.join("; "))
+                        }
+                    }
+                }
+            }
+        }
+
+        section .joint {
+            h2 .session-h { "Together" }
+            div .chat {
+                @for u in &s.joint_transcript { (bubble(s, u)) }
+            }
+        }
+
+        @if !s.proposals.is_empty() {
+            section .session-options {
+                h2 .session-h { "On the table" }
+                @for p in &s.proposals {
+                    div .opt {
+                        span .opt-badge[p.coherent] { @if p.coherent { "fair · certified" } @else { "uncertified" } }
+                        span .opt-sum { (p.summary) }
+                    }
+                }
+            }
+        }
+
+        p .session-foot {
+            "Conducted by " strong { (voice) } ". Everything it relied on is certified — "
+            a href=(format!("/operator/{}", s.id)) { "see the receipts" } "."
+        }
+    }
+}
+
+fn bubble(s: &Session, u: &mediator_session::Utterance) -> Markup {
+    use mediator_session::Speaker;
+    match &u.speaker {
+        Speaker::Mediator => html! { div .b.med { span .who { "mediator" } p { (u.text) } } },
+        Speaker::Party(p) => html! { div .b.party { span .who { (s.party_name(p)) } p { (u.text) } } },
+        Speaker::System => html! { div .b.sys { p { (u.text) } } },
+    }
+}
+
+const SESSION_CSS: &str = r#"
+.caucus, .joint, .session-options { margin: 1.6rem 0; }
+.session-h { font-size: 1.05rem; letter-spacing: .02em; opacity: .8; margin: 0 0 .7rem; }
+.chat { display: flex; flex-direction: column; gap: .7rem; }
+.b { max-width: 46rem; padding: .7rem .95rem; border-radius: 14px; }
+.b p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+.b .who { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; opacity: .55; margin-bottom: .25rem; }
+.b.med { background: #fbf6ee; border: 1px solid #efe4d2; align-self: flex-start; }
+.b.party { background: #f3f4f6; border: 1px solid #e5e7eb; align-self: flex-end; }
+.b.sys { background: transparent; border: 1px dashed #d6c8b0; align-self: center; font-style: italic; opacity: .8; }
+@media (prefers-color-scheme: dark) {
+  .b.med { background: #2a2620; border-color: #3a3328; }
+  .b.party { background: #232427; border-color: #34363b; }
+}
+.interest { margin: .6rem .2rem 0; font-size: .9rem; opacity: .75; font-style: italic; }
+.session-options .opt { display: flex; gap: .8rem; align-items: baseline; padding: .55rem 0; border-bottom: 1px solid #00000010; }
+.opt-badge { font-size: .7rem; padding: .1rem .5rem; border-radius: 999px; background: #e9f3ec; color: #2f6b46; white-space: nowrap; }
+.session-foot { margin-top: 1.6rem; font-size: .92rem; opacity: .8; }
+"#;
 
 // ─────────────────────────────── the gallery ─────────────────────────────────
 
@@ -385,6 +544,18 @@ async fn seat_picker(
                 span .seat-hint {
                     "The cockpit: certified ledger findings, the crux verdict, the "
                     "settlement table, and the hash-chained receipt ledger."
+                }
+            }
+        }
+
+        section {
+            a .seat .seat-session href=(format!("/session/{}", d.id)) {
+                span .seat-i { "Sit in on the whole mediation" }
+                span .seat-sub { "the session · how it actually mediates" }
+                span .seat-hint {
+                    "Watch a full mediation conducted end to end — the private "
+                    "caucuses, the common ground, the one open question handed "
+                    "back, and the fair options. The facts underneath are checked."
                 }
             }
         }

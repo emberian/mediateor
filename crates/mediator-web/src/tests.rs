@@ -130,6 +130,25 @@ async fn seat_picker_returns_200() {
     assert!(html.contains("Choose your seat"));
     assert!(html.contains("I'm Robin"));
     assert!(html.contains("/operator/roommate"));
+    assert!(html.contains("/session/roommate"), "session link missing");
+}
+
+#[tokio::test]
+async fn session_route_renders_conducted_mediation() {
+    let app = router(fixture_state());
+    let resp = app
+        .oneshot(Request::builder().uri("/session/roommate").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp).await;
+    assert!(html.contains("A mediation, conducted"));
+    assert!(html.contains("In private with"));
+    assert!(html.contains("Together"));
+    // no live LLM in tests → the deterministic scripted voice
+    assert!(html.contains("scripted preview voice"));
+    // a party is never told they're "wrong"
+    assert!(!html.to_lowercase().contains("you are wrong"));
 }
 
 #[tokio::test]
