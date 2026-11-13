@@ -1,3 +1,5 @@
+> PDFs live in the local paper library. Restore exact saved versions with `python3 tools/paperbin.py restore`; see [PAPERS.txt](PAPERS.txt).
+
 # we hate each other but not that badly ☄️
 
 live demo online: <https://mediateor.fg-goose.online>. 

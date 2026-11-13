@@ -1,3 +1,6 @@
 /target
 /workflows
 /.claude
+
+# PDFs live in the local paper library; see PAPERS.txt.
+*.[pP][dD][fF]

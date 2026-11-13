@@ -1,0 +1,197 @@
+{
+  "original_tip": "5d95997805e63fe030ddb640d53515915f6c0d1c",
+  "papers": [
+    {
+      "path": "pdfs/ai-safety-via-debate.1805.00899.pdf",
+      "oid": "2f89c3fdbaeffc07dd7b77f0adb35969d3da07bd",
+      "bytes": 1315239,
+      "mode": "100644",
+      "sha256": "58b8999dda10e3c6bc3552287dd8d7b696a042b827765ceabf27f7cb5895da8f",
+      "library_path": "repo-rescue-2026-11-13/papers/58b8999dda10e3c6--ai-safety-via-debate.1805.00899.pdf"
+    },
+    {
+      "path": "pdfs/autoformalization-with-llms.2205.12615.pdf",
+      "oid": "a5f7b88a8bc3b264171f7e5b6d0688eaeb45e0c2",
+      "bytes": 438909,
+      "mode": "100644",
+      "sha256": "41cf18a737b70688a367998fec43ef9a4da9f409a5426e7e11c9767438cf11d4",
+      "library_path": "autoformalization-with-large-language-models-wu-neurips2022-2205.12615.pdf"
+    },
+    {
+      "path": "pdfs/baldur-wholeproof-generation-repair.2303.04910.pdf",
+      "oid": "0be09c053c86ed9fc036f7c4746ddddc63673601",
+      "bytes": 802674,
+      "mode": "100644",
+      "sha256": "c11a1101763796126666d529bf4cad55353230915e7a0f6bcd47c89524090d73",
+      "library_path": "first2023-baldur-whole-proof-generation-repair-llm.pdf"
+    },
+    {
+      "path": "pdfs/chateval-multiagent-judge.2308.07201.pdf",
+      "oid": "c8f02b39af5f17cc7dc9a3f99f3b2ba4d8f76145",
+      "bytes": 780002,
+      "mode": "100644",
+      "sha256": "33cf1da3370e441b6a2f6ce29c420be79760e45b6efdbad2261bc6fbc7396698",
+      "library_path": "repo-rescue-2026-11-13/papers/33cf1da3370e441b--chateval-multiagent-judge.2308.07201.pdf"
+    },
+    {
+      "path": "pdfs/constitutional-ai.2212.08073.pdf",
+      "oid": "c574e376ffb13b6a08659a350d6dc282974ffc05",
+      "bytes": 2088111,
+      "mode": "100644",
+      "sha256": "9a456a07ad346e3372f9867d346f69f5b0f68b4c65f060aca0b8a13fa9d98e83",
+      "library_path": "repo-rescue-2026-11-13/papers/9a456a07ad346e33--constitutional-ai.2212.08073.pdf"
+    },
+    {
+      "path": "pdfs/copra-incontext-prover-agent.2310.04353.pdf",
+      "oid": "9e3e3c2621fe1df844bf71597030ee06c12d7356",
+      "bytes": 911102,
+      "mode": "100644",
+      "sha256": "cf7f728157fd308954c38140a97e16061cad59598b03919298b5a1564ad11a59",
+      "library_path": "thakur2023-copra-in-context-agent-theorem-proving.pdf"
+    },
+    {
+      "path": "pdfs/dont-trust-verify-autoformalization.2403.18120.pdf",
+      "oid": "ced849bc4860085823e58443a97c5f61d9d8f35f",
+      "bytes": 1321730,
+      "mode": "100644",
+      "sha256": "a8ec9d31b2d96eac058fe5fd3ec14a2b55a0bfe1d86bc4e19814322391afae04",
+      "library_path": "repo-rescue-2026-11-13/papers/a8ec9d31b2d96eac--dont-trust-verify-autoformalization.2403.18120.pdf"
+    },
+    {
+      "path": "pdfs/draft-sketch-prove.2210.12283.pdf",
+      "oid": "e9c16f8f09ba5bc387055cec1154b0940b26e501",
+      "bytes": 3020630,
+      "mode": "100644",
+      "sha256": "ac61a6659bcd5757514ee16cf2f11cca86f4a15a7503c1b911a6f7cc40b0b047",
+      "library_path": "draft-sketch-prove-jiang-iclr2023-2210.12283.pdf"
+    },
+    {
+      "path": "pdfs/isabelle-server-python-client.2212.11173.pdf",
+      "oid": "16af251ee8b59a3883d4b0661434d12431685f40",
+      "bytes": 324328,
+      "mode": "100644",
+      "sha256": "afa1da0d4b271a01f6ac0ad48b7fd8fe30ffd8f45c1420056f381fb826d723d9",
+      "library_path": "repo-rescue-2026-11-13/papers/afa1da0d4b271a01--isabelle-server-python-client.2212.11173.pdf"
+    },
+    {
+      "path": "pdfs/language-model-council.2406.08598.pdf",
+      "oid": "2d1929854739c57267a369926691d9f98b485199",
+      "bytes": 1842308,
+      "mode": "100644",
+      "sha256": "7bd0476f85bd766465e29d79723fa1642875c1110b7b79cb5782bfe464f24a4d",
+      "library_path": "repo-rescue-2026-11-13/papers/7bd0476f85bd7664--language-model-council.2406.08598.pdf"
+    },
+    {
+      "path": "pdfs/lean-copilot.2404.12534.pdf",
+      "oid": "3d6f6c25677adad9e35427e57837f0ed2ba7b923",
+      "bytes": 997718,
+      "mode": "100644",
+      "sha256": "5ac8ca11a79cbc8a8fe5c3ab795d5e7c01fdb15516b2bec0eac5881528e03eae",
+      "library_path": "song2024-lean-copilot.pdf"
+    },
+    {
+      "path": "pdfs/leanagent-lifelong-learning.2410.06209.pdf",
+      "oid": "29e88848601fb781eb802a425726862ac0c054b4",
+      "bytes": 3011096,
+      "mode": "100644",
+      "sha256": "af3791a20f5fc5d59646c6d38b1e94fc672eef6ed9a40b0eb26ed97d11e04fc6",
+      "library_path": "repo-rescue-2026-11-13/papers/af3791a20f5fc5d5--leanagent-lifelong-learning.2410.06209.pdf"
+    },
+    {
+      "path": "pdfs/leandojo-reprover.2306.15626.pdf",
+      "oid": "8f64d523ef52f5f0c5d2f313eec13d1318cd1bce",
+      "bytes": 2967642,
+      "mode": "100644",
+      "sha256": "8eb0b3e351150d330202e30af528c9eb548a79905f52bdb0db04686a75b02649",
+      "library_path": "leandojo-retrieval-augmented-theorem-proving-neurips2023-2306.15626.pdf"
+    },
+    {
+      "path": "pdfs/lego-prover-growing-libraries.2310.00656.pdf",
+      "oid": "7e768aaaf342e571d7d80bf753410448e589c778",
+      "bytes": 2958546,
+      "mode": "100644",
+      "sha256": "8bed3192fcce006241451feea49f4bec65b4ad993cf685472e5216aa65a4cb2e",
+      "library_path": "repo-rescue-2026-11-13/papers/8bed3192fcce0062--lego-prover-growing-libraries.2310.00656.pdf"
+    },
+    {
+      "path": "pdfs/llm-as-judge-mtbench.2306.05685.pdf",
+      "oid": "81dd8753fae16807d4a5f7706d0e29944f4caedf",
+      "bytes": 1580141,
+      "mode": "100644",
+      "sha256": "1574982845157569b85c1214bfa9987000384d7a5e3b5fbdcc5a29afec59cb81",
+      "library_path": "repo-rescue-2026-11-13/papers/1574982845157569--llm-as-judge-mtbench.2306.05685.pdf"
+    },
+    {
+      "path": "pdfs/llmstep-lean-suggestions.2310.18457.pdf",
+      "oid": "398f09546d2eeb460daad1a7c02cc7271121141f",
+      "bytes": 613922,
+      "mode": "100644",
+      "sha256": "8dede409e8b5a2a29a065157fce22fdd2c331e8ff946264257ebfe75cee2c224",
+      "library_path": "repo-rescue-2026-11-13/papers/8dede409e8b5a2a2--llmstep-lean-suggestions.2310.18457.pdf"
+    },
+    {
+      "path": "pdfs/magnushammer-premise-selection.2303.04488.pdf",
+      "oid": "d7f6a83fabb789f7739265d79153d286150c42b9",
+      "bytes": 1307127,
+      "mode": "100644",
+      "sha256": "7ee49407a0f7a3cf398a4832fcfa05525b86ae3dc7c0660994b95dc255254aba",
+      "library_path": "repo-rescue-2026-11-13/papers/7ee49407a0f7a3cf--magnushammer-premise-selection.2303.04488.pdf"
+    },
+    {
+      "path": "pdfs/mixture-of-agents.2406.04692.pdf",
+      "oid": "b45c48dddc3e6e6c4af969d35217b3b7db602884",
+      "bytes": 1157463,
+      "mode": "100644",
+      "sha256": "b7bc82e95971e60f1ad54c8accd2d2fa101e8b43adb887511bf52c7e98e83a7d",
+      "library_path": "wang-etal2024-mixture-of-agents-2406.04692.pdf"
+    },
+    {
+      "path": "pdfs/multiagent-debate-du.2305.14325.pdf",
+      "oid": "cb3b7b6098e58ee4eca6db9c49306454fbaa2554",
+      "bytes": 1779875,
+      "mode": "100644",
+      "sha256": "b302ff15202dc3cda03f40ea1ac92b29e1519978540b345af92991f6d3e619b4",
+      "library_path": "du-li-torralba-tenenbaum-mordatch2023-multiagent-debate-factuality-reasoning.pdf"
+    },
+    {
+      "path": "pdfs/nl2spec-temporal-logic.2303.04864.pdf",
+      "oid": "52e1c8518e5a9e07fe1906f1a2fae4751cf9e166",
+      "bytes": 1533512,
+      "mode": "100644",
+      "sha256": "dcaac50892633aee0f310844836b73bc8aade6e5e2662174e006b0621bd615f2",
+      "library_path": "repo-rescue-2026-11-13/papers/dcaac50892633aee--nl2spec-temporal-logic.2303.04864.pdf"
+    },
+    {
+      "path": "pdfs/position-bias-llm-judges.2406.07791.pdf",
+      "oid": "ef7cfd218eef7c269a8ffefbf0e8e2cc074a0bca",
+      "bytes": 4651042,
+      "mode": "100644",
+      "sha256": "1db719e5400f23b81af50d49647a0cc233c2c6e967e9dd514d9811e2355263a2",
+      "library_path": "repo-rescue-2026-11-13/papers/1db719e5400f23b8--position-bias-llm-judges.2406.07791.pdf"
+    },
+    {
+      "path": "pdfs/prompt-infection-llm-injection.2410.07283.pdf",
+      "oid": "afb4c170be226f4c647639321a8269e156a31e9d",
+      "bytes": 3617894,
+      "mode": "100644",
+      "sha256": "9b2c2c3a11c03fbdd8fce1eb23cc34d2a000b2d3ca1a297f508ea8a75e18b512",
+      "library_path": "repo-rescue-2026-11-13/papers/9b2c2c3a11c03fbd--prompt-infection-llm-injection.2410.07283.pdf"
+    },
+    {
+      "path": "pdfs/self-consistency-cot.2203.11171.pdf",
+      "oid": "89efd7d4bbcd085bb6dbe7c59286ff276cc7f5ec",
+      "bytes": 10505941,
+      "mode": "100644",
+      "sha256": "1a49ce0373afc89d2d6e97fb1aa8230f6b818c70590d732a3187f753f4df6aba",
+      "library_path": "repo-rescue-2026-11-13/papers/1a49ce0373afc89d--self-consistency-cot.2203.11171.pdf"
+    },
+    {
+      "path": "pdfs/thor-hammers-lm-atp.2205.10893.pdf",
+      "oid": "90c40e7cbb002b88ad5e1c46be56312fb5486a0d",
+      "bytes": 702604,
+      "mode": "100644",
+      "sha256": "72a40e7d73ef562b2491499cd052910bd43c7ca97c59979e9522e8697b1905b2",
+      "library_path": "repo-rescue-2026-11-13/papers/72a40e7d73ef562b--thor-hammers-lm-atp.2205.10893.pdf"
+    }
+  ]
+}
